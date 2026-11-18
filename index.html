@@ -160,6 +160,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 const r05 = x => Math.round(x * 2) / 2;
 const num = x => { const r = r05(x); return (Number.isInteger(r) ? String(r) : r.toFixed(1)).replace('.', ','); };
 const mm = x => num(x) + ' mm';
+globalThis.numMm = num;
 const cm2m = x => (Math.round(x / 10) / 100).toFixed(2).replace('.', ',') + ' m';
 const sum = a => a.reduce((s, x) => s + x, 0);
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
@@ -272,14 +273,19 @@ function packLengths(items, binLen, kerf) {
   }
   return bins;
 }
-function stripPlanSvg(bins, binLen, stripW, perSheet, caption) {
-  const gap = stripW * 0.25, fs = Math.max(18, binLen / 45);
+function stripPlanSvg(bins, binLen, stripW, perSheet, caption, opts = {}) {
+  if (opts.group) {
+    const map = new Map();
+    bins.forEach(b => { const k = b.items.map(i => i.label + i.len).join('|'); if (map.has(k)) map.get(k).n++; else map.set(k, { ...b, n: 1 }); });
+    bins = [...map.values()];
+  }
+  const fs = Math.max(18, binLen / 45), gap = Math.max(stripW * 0.25, fs * 1.4);
   const H = bins.length * (stripW + gap) + fs * 1.5;
   let g = '';
   bins.forEach((b, i) => {
     const y = i * (stripW + gap) + fs * 1.2;
     const sheetNo = Math.floor(i / perSheet) + 1;
-    g += S.text(0, y - 4, `Streifen ${i + 1} (Platte ${sheetNo})`, `font-size="${fs * 0.75}" class="lbl"`);
+    g += S.text(0, y - 4, opts.group ? `${b.n}× ${opts.name}` : `Streifen ${i + 1} (Platte ${sheetNo})`, `font-size="${fs * 0.75}" class="lbl"`);
     g += S.rect(0, y, binLen, stripW, 'fill="#f3efe6" stroke="#999" stroke-dasharray="6 4"');
     let x = 0;
     for (const it of b.items) {
@@ -292,14 +298,15 @@ function stripPlanSvg(bins, binLen, stripW, perSheet, caption) {
 }
 
 /* ---------- Generische Ausgabe ---------- */
-function partsTable(parts) {
+function partsTable(parts, unit) {
   if (!parts.length) return '';
+  const num = unit === 'cm' ? (x => (Math.round(x) / 10).toFixed(1).replace('.', ',')) : globalThis.numMm;
   let h = '<div class="tablewrap"><table><tr><th>Pos</th><th>Teil</th><th class="n">Stk</th><th class="n">Länge</th><th class="n">Breite</th><th class="n">Stärke</th><th>Material / Hinweis</th></tr>';
   parts.forEach((p, i) => {
     h += `<tr><td>${i + 1}</td><td>${esc(p.name)}</td><td class="n">${p.qty}</td><td class="n">${p.l != null ? num(p.l) : '–'}</td>` +
       `<td class="n">${p.b != null ? num(p.b) : '–'}</td><td class="n">${p.t != null ? num(p.t) : '–'}</td><td>${esc(p.mat || '')}${p.note ? '<br><small>' + esc(p.note) + '</small>' : ''}</td></tr>`;
   });
-  return h + '</table></div><p class="note">Alle Maße in mm. Länge = Faserrichtung bzw. lange Seite.</p>';
+  return h + `</table></div><p class="note">Alle Maße in ${unit === 'cm' ? 'cm' : 'mm'}. Länge = Faserrichtung bzw. lange Seite.</p>`;
 }
 function listTable(rows, head) {
   if (!rows.length) return '';
@@ -314,232 +321,313 @@ function renderPlan(plan) {
   (plan.msgs || []).forEach(m => { h += `<div class="msg ${m[0]}">${esc(m[1])}</div>`; });
   if (plan.fatal) return h;
   if (plan.drawings && plan.drawings.length) h += '<h3>Zeichnungen</h3>' + plan.drawings.join('');
-  if (plan.parts && plan.parts.length) h += '<h3>Zuschnittliste</h3>' + partsTable(plan.parts);
+  if (plan.afterDrawings) h += plan.afterDrawings;
+  if (plan.parts && plan.parts.length) h += '<h3>Zuschnittliste</h3>' + partsTable(plan.parts, plan.unit);
   if (plan.cutplan) h += '<h3>Zuschnittplan</h3>' + plan.cutplan;
   if (plan.jigs && plan.jigs.length) h += '<h3>Lehren &amp; Hilfsmittel (selbst bauen)</h3>' + listTable(plan.jigs, ['Lehre', 'Maß', 'Wofür']);
   if (plan.buy && plan.buy.length) h += '<h3>Einkaufsliste</h3>' + listTable(plan.buy, ['Artikel', 'Menge', 'Hinweis']);
   if (plan.steps && plan.steps.length) h += '<h3>Bauanleitung</h3><ol class="steps">' + plan.steps.map(s => `<li>${s}</li>`).join('') + '</ol>';
   if (plan.extraHtml) h += plan.extraHtml;
   if (plan.templates && plan.templates.length) {
-    h += '<h3>Schablonen 1:1 zum Ausdrucken</h3><div class="msg info noprint">Beim Drucken „Tatsächliche Größe / 100 %“ wählen, nicht „An Seite anpassen“. Auf jedem Blatt ist ein 100-mm-Kontrollmaß – vor dem Bohren nachmessen! Mehrteilige Schablonen an der gestrichelten Linie zuschneiden und stumpf aneinanderkleben.</div>';
+    h += '<h3>Schablonen 1:1 zum Ausdrucken</h3><div class="msg info noprint">Beim Drucken „Tatsächliche Größe / 100 %“ wählen, nicht „An Seite anpassen“. Auf jedem Blatt ist ein 100-mm-Kontrollmaß (= 10 cm) – vor dem Bohren nachmessen! Mehrteilige Schablonen an der gestrichelten Linie zuschneiden und stumpf aneinanderkleben.</div>';
     h += '<div class="tpls">' + plan.templates.map(renderTemplate).join('') + '</div>';
   }
   return h;
 }
 
 /* =====================================================================
-   TOOL 1: SAMLA-Kistenregal
+   TOOL 1: Boxenregal für IKEA SAMLA (Kantholz-Rahmen + Dachlatten-Schienen)
+   System nach „das boxenregal – Bauplan v0.1“:
+   - 2 Rahmen (vorne/hinten) aus Balken + Pfosten, Kantholz 78 × 58
+   - Schienen aus Dachlatte, so lang wie die Regaltiefe, links und rechts an die Pfosten
+   - Boxen hängen mit dem Rand auf den Schienen, 39-cm-Seite quer
+   - Höhen über Abstandsplatten A–D, Pfostenabstand über Abstandsholz
    ===================================================================== */
-const SAMLA = {
-  '5': { name: 'SAMLA 5 l', L: 280, W: 190, H: 140 },
-  '11': { name: 'SAMLA 11 l', L: 390, W: 280, H: 140 },
-  '22': { name: 'SAMLA 22 l (39×28×28)', L: 390, W: 280, H: 280 },
-  '45': { name: 'SAMLA 45 l (57×39×28)', L: 570, W: 390, H: 280 },
-  '65': { name: 'SAMLA 65 l (57×39×42)', L: 570, W: 390, H: 420 },
-  '130': { name: 'SAMLA 130 l', L: 790, W: 570, H: 430 },
-  'custom': { name: 'Eigene Kiste' },
+const FACH_TYPES = {
+  G: { name: 'G (3× 65 l, Rest 45 l)', n65: 3, n22: 0 },
+  M: { name: 'M (1× 65 l, Rest 45 l)', n65: 1, n22: 0 },
+  K: { name: 'K (45 l unten, 4 Ebenen 2× 22 l)', n65: 0, n22: 4 },
+  A45: { name: 'nur 45 l', n65: 0, n22: 0 },
+  A22: { name: 'nur 2× 22 l', n65: 0, n22: 99 },
+  A65: { name: 'nur 65 l', n65: 99, n22: 0 },
 };
-const SHEETS = { '2500x1250': [2500, 1250], '2800x2070': [2800, 2070], '2440x1220': [2440, 1220], '2050x1250': [2050, 1250] };
+const PATTERNS = {
+  mix: { name: 'gemischt: G M K K …', seq: ['G', 'M', 'K', 'K'] },
+  gmk: { name: 'gemischt: G M K …', seq: ['G', 'M', 'K'] },
+  A45: { name: 'alle Fächer nur 45 l', seq: ['A45'] },
+  A65: { name: 'alle Fächer nur 65 l', seq: ['A65'] },
+  A22: { name: 'alle Fächer nur 22 l', seq: ['A22'] },
+  G: { name: 'alle Fächer G', seq: ['G'] },
+  M: { name: 'alle Fächer M', seq: ['M'] },
+  K: { name: 'alle Fächer K', seq: ['K'] },
+};
+const BOXLBL = { '65': '65 l', '45': '45 l', '22': '2× 22 l' };
+const cmS = x => (Math.round(x) / 10).toFixed(1).replace('.', ',');
+const isForm = (...f) => v => f.includes(v.form);
 
-const toolSamla = {
-  id: 'samla',
-  title: 'SAMLA-Regal',
+const toolBoxen = {
+  id: 'boxen',
+  title: 'SAMLA-Boxenregal',
+  unit: 'cm',
   fields: [
-    { g: 'Außenmaße Regal', id: 'H', label: 'Höhe H', def: 1000, unit: 'mm' },
-    { g: 'Außenmaße Regal', id: 'B', label: 'Breite B', def: 930, unit: 'mm', help: 'Wird auf volle Fächer abgerundet' },
-    { g: 'Außenmaße Regal', id: 'T', label: 'Tiefe T', def: 450, unit: 'mm' },
-    { g: 'Kiste', id: 'box', label: 'Kistentyp', type: 'select', def: '22', options: Object.entries(SAMLA).map(([k, v]) => [k, v.name]),
-      onchange: (v, set) => { const b = SAMLA[v]; if (b && b.L) { set('boxL', b.L); set('boxW', b.W); set('boxH', b.H); } } },
-    { g: 'Kiste', id: 'orient', label: 'Kiste einschieben mit', type: 'select', def: 'short', options: [['short', 'Schmalseite vorne'], ['long', 'Längsseite vorne']] },
-    { g: 'Kiste', id: 'boxL', label: 'Kiste Länge (über Rand)', def: 390, unit: 'mm', help: 'Selbst nachmessen!' },
-    { g: 'Kiste', id: 'boxW', label: 'Kiste Breite (über Rand)', def: 280, unit: 'mm' },
-    { g: 'Kiste', id: 'boxH', label: 'Kistenhöhe (IKEA-Angabe)', def: 280, unit: 'mm', help: 'IKEA gibt die Höhe inkl. Deckel an – passt so' },
-    { g: 'Kiste', id: 'o', label: 'Randüberstand je Seite', def: 15, unit: 'mm', help: 'Wie weit der obere Rand seitlich über die Wand der Kiste ragt' },
-    { g: 'Kiste', id: 'rimT', label: 'Randhöhe', def: 10, unit: 'mm', help: 'Von Unterkante Rand bis Oberkante Kiste' },
-    { g: 'Kiste', id: 'lid', label: 'Extra-Luft oben', def: 0, unit: 'mm', help: 'nur falls die Kisten höher sind als angegeben' },
-    { g: 'Material', id: 's', label: 'Plattenstärke', def: 18, unit: 'mm' },
-    { g: 'Material', id: 'sheet', label: 'Plattenformat', type: 'select', def: '2500x1250', options: Object.keys(SHEETS).map(k => [k, k.replace('x', ' × ') + ' mm']) },
-    { g: 'Material', id: 'rh', label: 'Gleitleiste Höhe', def: 20, unit: 'mm' },
-    { g: 'Material', id: 'p', label: 'Gleitleiste Stärke', def: 15, unit: 'mm', help: 'Wie weit die Leiste von der Wand absteht' },
-    { g: 'Material', id: 'stock', label: 'Leisten-Lagerlänge', def: 2400, unit: 'mm' },
-    { g: 'Material', id: 'back', label: 'Rückwand', type: 'select', def: 'hdf', options: [['hdf', 'HDF 3 mm aufgenagelt'], ['none', 'keine (Anschlagklötze)']] },
-    { g: 'Spiel & Luft', id: 'spiel', label: 'Seitliches Spiel Kiste', def: 6, unit: 'mm' },
-    { g: 'Spiel & Luft', id: 'gap', label: 'Mind. Luft zwischen Kisten', def: 20, unit: 'mm' },
-    { g: 'Spiel & Luft', id: 'kerf', label: 'Schnittbreite Säge', def: 3, unit: 'mm' },
+    { g: 'Raum', id: 'form', label: 'Regalform', type: 'select', def: 'I', options: [['I', 'I – eine Wand'], ['L', 'L – Rückwand + linke Wand'], ['U', 'U – drei Wände']] },
+    { g: 'Raum', id: 'Wb', label: 'Rückwand Länge', def: 2050, unit: 'mm' },
+    { g: 'Raum', id: 'Wl', label: 'Linke Wand Länge', def: 2000, unit: 'mm', show: isForm('L', 'U') },
+    { g: 'Raum', id: 'Wr', label: 'Rechte Wand Länge', def: 2000, unit: 'mm', show: isForm('U') },
+    { g: 'Raum', id: 'H', label: 'Regalhöhe', def: 2200, unit: 'mm', help: 'Raumhöhe minus Luft zum Aufrichten (ca. 10 cm)' },
+    { g: 'Belegung', id: 'pattern', label: 'Fächer belegen', type: 'select', def: 'mix', options: Object.entries(PATTERNS).map(([k, p]) => [k, p.name]) },
+    { g: 'Boxen (selbst messen!)', id: 'r65', label: 'Randmaß r 65 l', def: 411, unit: 'mm', help: 'Boxboden bis Unterkante Rand' },
+    { g: 'Boxen (selbst messen!)', id: 'r28', label: 'Randmaß r 45/22 l', def: 271, unit: 'mm' },
+    { g: 'Boxen (selbst messen!)', id: 'clear', label: 'Lichte Weite Schienen', def: 365, unit: 'mm', help: 'Box-Rand 390 muss sicher aufliegen, Körper muss durchpassen' },
+    { g: 'Holz', id: 'T', label: 'Regaltiefe = Schienenlänge', def: 600, unit: 'mm' },
+    { g: 'Holz', id: 'kb', label: 'Kantholz sichtbare Breite', def: 58, unit: 'mm', help: 'Kantholz 78 × 58, 58er-Seite nach vorne' },
+    { g: 'Holz', id: 'kt', label: 'Kantholz Tiefe', def: 78, unit: 'mm' },
+    { g: 'Holz', id: 'lh', label: 'Dachlatte Höhe', def: 50, unit: 'mm' },
+    { g: 'Holz', id: 'lt', label: 'Dachlatte Stärke', def: 30, unit: 'mm' },
+    { g: 'Holz', id: 'stock', label: 'Lagerlänge Holz', def: 2500, unit: 'mm' },
+    { g: 'Holz', id: 'kerf', label: 'Schnittbreite Säge', def: 3, unit: 'mm' },
+    { g: 'Abstände', id: 'wallGap', label: 'Wandabstand', def: 20, unit: 'mm' },
+    { g: 'Abstände', id: 'head', label: 'Mind. Luft über oberster Schiene', def: 60, unit: 'mm' },
+    { g: 'Preise (ca.)', id: 'pK', label: 'Kantholz 2,5 m', def: 10.5, unit: '€' },
+    { g: 'Preise (ca.)', id: 'pL', label: 'Dachlatte 2,5 m', def: 2.1, unit: '€' },
   ],
   compute(v) {
-    const msgs = [], plan = { title: 'SAMLA-Kistenregal', msgs };
-    const s = v.s, rimW = v.orient === 'short' ? Math.min(v.boxL, v.boxW) : Math.max(v.boxL, v.boxW);
-    const rimD = v.orient === 'short' ? Math.max(v.boxL, v.boxW) : Math.min(v.boxL, v.boxW);
-    const C = rimW + v.spiel;                       // lichte Fachbreite
-    const pMax = v.o + (v.spiel - 4) / 2;           // max. Leistenstärke, damit Kistenkörper durchpasst
-    let p = v.p;
-    if (p > pMax) { p = Math.floor(pMax); msgs.push(['warn', `Gleitleiste auf ${p} mm Stärke reduziert – sonst klemmt der Kistenkörper zwischen den Leisten (Randüberstand ${v.o} mm).`]); }
-    const auflage = p - v.spiel / 2;
-    if (auflage < 6) msgs.push(['warn', `Der Kistenrand liegt nur ${num(auflage)} mm auf der Leiste auf. Randüberstand nachmessen oder seitliches Spiel verkleinern.`]);
-    const Hi = v.H - 2 * s, Bi = v.B - 2 * s;
-    const nC = Math.floor((Bi + s) / (C + s));
-    const slotMin = v.boxH + v.lid + v.gap;
-    const nR = Math.floor(Hi / slotMin);
-    if (nC < 1) { msgs.push(['err', `Breite zu klein: Für eine Kiste braucht das Regal mindestens ${mm(C + 2 * s)} Breite.`]); plan.fatal = true; return plan; }
-    if (nR < 1) { msgs.push(['err', `Höhe zu klein: Für eine Reihe braucht das Regal mindestens ${mm(slotMin + 2 * s)} Höhe.`]); plan.fatal = true; return plan; }
-    const Beff = nC * C + (nC - 1) * s + 2 * s;
-    if (v.B - Beff > 0.4) msgs.push(['info', `Breite auf ${mm(Beff)} angepasst (${nC} Fächer à ${mm(C)} lichte Breite). Für ein weiteres Fach wäre B = ${mm(Beff + C + s)} nötig.`]);
-    const back = v.back === 'hdf' ? 3 : 0;
-    const setback = 5;
-    const L = v.T - setback;                        // Leistenlänge
-    if (L < rimD) msgs.push(['warn', `Kiste (${mm(rimD)} tief) ragt ${mm(rimD - L)} über die Leisten nach vorne hinaus. Tiefe T auf mindestens ${mm(rimD + setback)} erhöhen.`]);
-    if (v.T > rimD + 80) msgs.push(['info', `Die Kiste sitzt ${mm(v.T - rimD)} hinter der Vorderkante – Griff ist evtl. schlecht erreichbar. Passende Tiefe wäre ca. ${mm(rimD + 20)}.`]);
+    const msgs = [], plan = { title: 'SAMLA-Boxenregal', msgs, unit: 'cm' };
+    const kb = v.kb, gap = v.clear + 2 * v.lt, raster = gap + kb;
+    const postLen = v.H - 2 * kb, maxTop = v.H - kb - v.head;
+    const depth = v.T + v.wallGap;                       // Platz von der Wand bis Vorderkante
+    if (v.clear >= 390 - 10) msgs.push(['err', `Lichte Weite ${cmS(v.clear)} cm ist zu groß – der Box-Rand (39 cm) liegt kaum noch auf. Üblich: 36,5 cm.`]);
+    if (v.T < 570) msgs.push(['warn', `Regaltiefe ${cmS(v.T)} cm ist kürzer als die 65/45-l-Box (57 cm).`]);
+    if (v.T < 560) msgs.push(['warn', 'Zwei 22-l-Boxen (2 × 28 cm) passen nicht hintereinander.']);
 
-    // Reihen gleichmäßig verteilen
-    const P = Hi / nR;
-    const c = (P - v.boxH - v.lid) / 2;
+    // Abstandsplatten: A/B für 28 cm hohe Boxen, C/D für 65 l
+    const plates = { A: v.r28 - 38, B: v.r28 - 1, C: v.r65 - 38, D: v.r65 - 1 };
+    const fachCache = {};
+    const fachLevels = type => {
+      if (fachCache[type]) return fachCache[type];
+      const ft = FACH_TYPES[type], lv = [];
+      let prev = kb;
+      const add = box => {
+        const big = box === '65', first = !lv.length;
+        const plate = big ? (first ? 'C' : 'D') : (first ? 'A' : 'B');
+        const top = prev + plates[plate] + v.lh;
+        if (top > maxTop) return false;
+        lv.push({ box, plate, top }); prev = top; return true;
+      };
+      for (let i = 0; i < ft.n65; i++) if (!add('65')) break;
+      while (add('45'));
+      let k = ft.n22;
+      for (let i = lv.length - 1; i >= 0 && k > 0; i--) if (lv[i].box === '45') { lv[i].box = '22'; k--; }
+      return (fachCache[type] = lv);
+    };
+
+    // Reihen nach Regalform
     const rows = [];
-    for (let i = 0; i < nR; i++) {
-      const slotTop = Hi - i * P;                   // von Oberkante Boden (innen) gemessen
-      const railTop = slotTop - c - v.lid - v.rimT;
-      rows.push({ railTop, railBot: railTop - v.rh, fromPanelTop: v.H - s - railTop });
+    if (v.form === 'I') rows.push({ name: 'Rückwand', usable: v.Wb - 30 });
+    if (v.form === 'L') rows.push({ name: 'Rückwand', usable: v.Wb - depth - 30 }, { name: 'Linke Wand', usable: v.Wl - depth - 30 });
+    if (v.form === 'U') {
+      rows.push({ name: 'Rückwand', usable: v.Wb - 2 * depth }, { name: 'Linke Wand', usable: v.Wl - depth - 30 }, { name: 'Rechte Wand', usable: v.Wr - depth - 30 });
+      const gang = v.Wb - 2 * depth;
+      if (gang < 650) msgs.push(['err', `Gang zwischen den Seitenreihen nur ${cmS(gang)} cm – mindestens 65 cm nötig, um Boxen herauszuziehen.`]);
     }
-    const startLehre = rows[0].fromPanelTop;        // Oberkante Seitenwand -> Oberkante 1. Leiste
-    const zwLehre = P - v.rh;                       // Unterkante Leiste -> Oberkante nächste Leiste
+    const seq = PATTERNS[v.pattern].seq;
+    const maxF = Math.max(1, Math.floor((v.stock - kb) / raster));
+    const fitRow = usable => {
+      for (let n = 60; n >= 1; n--) {
+        const m = Math.ceil(n / Math.min(5, maxF));
+        if (m * kb + n * raster <= usable) {
+          const base = Math.floor(n / m), extra = n % m;
+          return Array.from({ length: m }, (_, i) => base + (i < extra ? 1 : 0));
+        }
+      }
+      return [];
+    };
+    const modules = [];
+    rows.forEach(r => {
+      r.mods = fitRow(r.usable);
+      let f = 0;
+      r.mods.forEach(k => {
+        const types = Array.from({ length: k }, () => seq[f++ % seq.length]);
+        const mod = { row: r.name, k, len: kb + k * raster, types };
+        modules.push(mod);
+      });
+      r.len = sum(r.mods.map(k => kb + k * raster));
+      if (!r.mods.length) msgs.push(['warn', `${r.name}: zu kurz für ein Fach (mindestens ${cmS(kb + raster + 30)} cm nutzbare Länge nötig).`]);
+      else if (r.usable - r.len > raster * 0.6) msgs.push(['info', `${r.name}: ${cmS(r.usable - r.len)} cm bleiben frei. Für ein Fach mehr fehlen ${cmS(raster - (r.usable - r.len) + (r.mods.length < Math.ceil((sum(r.mods) + 1) / 5) ? kb : 0))} cm.`]);
+    });
+    if (!modules.length) { msgs.push(['err', 'Kein Modul passt an die Wand.']); plan.fatal = true; return plan; }
+    const types0 = [...new Set(modules.flatMap(m => m.types))];
+    types0.forEach(t => { if (!fachLevels(t).length) msgs.push(['err', `Fach ${t}: Regalhöhe zu gering für eine Box.`]); });
 
-    // Schrauben
-    const holes = L > 350 ? [40, L / 2, L - 40] : [40, L - 40];
-    const holesB = holes.map(x => x + 25);
-    let screwLen = STD_SCREW_LEN.filter(l => l <= p + s - 3).pop() || 16;
-    const railScrews = nR * nC * 2 * holes.length;
-    const nJ = v.T < 300 ? 2 : v.T < 500 ? 3 : 4;
-    const cornerHoles = nJ === 2 ? [40, v.T - 40] : Array.from({ length: nJ }, (_, i) => 40 + i * (v.T - 80) / (nJ - 1));
-    const carcassScrews = (4 + (nC - 1) * 2) * nJ;
-
-    // Teile
-    const parts = [
-      { name: 'Seitenwand', qty: 2, l: v.H, b: v.T, t: s, mat: 'Platte', note: 'spiegelbildlich – Oberkante markieren' },
-      { name: 'Boden / Deckel', qty: 2, l: Beff - 2 * s, b: v.T, t: s, mat: 'Platte', note: 'zwischen den Seiten' },
-    ];
-    if (nC > 1) parts.push({ name: 'Zwischenwand', qty: nC - 1, l: Hi, b: v.T, t: s, mat: 'Platte', note: 'zwischen Boden und Deckel' });
-    parts.push({ name: 'Gleitleiste', qty: nR * nC * 2, l: L, b: v.rh, t: p, mat: 'Leiste Buche/Kiefer', note: `Bohrbild A: ${nR * (nC + 1)} Stk, Bohrbild B: ${nR * (nC - 1)} Stk` });
-    if (back) parts.push({ name: 'Rückwand', qty: 1, l: v.H, b: Beff, t: 3, mat: 'HDF', note: 'im Baumarkt rechtwinklig schneiden lassen – macht das Regal steif' });
-    else parts.push({ name: 'Anschlagklotz', qty: nR * nC, l: 40, b: v.rh, t: 15, mat: 'Leistenrest', note: 'hinten auf eine Gleitleiste je Fach' });
-
-    // Zuschnittplan Platten (Streifen T)
-    const [shL, shW] = SHEETS[v.sheet];
-    const panelItems = [];
-    parts.filter(x => x.mat === 'Platte').forEach(x => { for (let i = 0; i < x.qty; i++) panelItems.push({ len: x.l, label: x.name.split(' ')[0] }); });
-    const perSheet = Math.floor((shW + v.kerf) / (v.T + v.kerf));
-    let sheets = 0, cutplan = '';
-    if (perSheet < 1) msgs.push(['err', `Tiefe ${mm(v.T)} ist breiter als die Platte (${mm(shW)}).`]);
-    else {
-      const bins = packLengths(panelItems, shL, v.kerf);
-      if (bins.some(b => b.over)) msgs.push(['err', `Ein Teil ist länger als die Platte (${mm(shL)}). Größeres Plattenformat wählen.`]);
-      sheets = Math.ceil(bins.length / perSheet);
-      cutplan = `<p>Platte ${shL} × ${shW} mm zuerst in <b>${bins.length} Streifen à ${mm(v.T)}</b> schneiden lassen (${perSheet} Streifen pro Platte), dann ablängen:</p>` +
-        stripPlanSvg(bins, shL, v.T, perSheet, 'Ablängplan der Plattenstreifen (Reihenfolge egal, Schnittfuge eingerechnet)');
-    }
-    const railBins = packLengths(Array.from({ length: nR * nC * 2 }, () => ({ len: L, label: 'L' })), v.stock, v.kerf);
+    // Summen
+    let nRails = 0, nPosts = 0, nBalken = 0, n6x120 = 0, nPlate = 0, lochband = 0, n4x35 = 0;
+    const boxes = { '65': 0, '45': 0, '22': 0 }, kantItems = [], railItems = [];
+    modules.forEach(m => {
+      nBalken += 4; nPosts += 2 * (m.k + 1); n6x120 += 8 * (m.k + 1);
+      for (let i = 0; i < 4; i++) kantItems.push({ len: m.len, label: 'A' });
+      for (let i = 0; i < 2 * (m.k + 1); i++) kantItems.push({ len: postLen, label: 'B' });
+      lochband += 2 * Math.hypot(m.len, v.H); n4x35 += 20;
+      nPlate += 2 * (Math.ceil(m.len / 1000) + 1);
+      m.types.forEach(t => fachLevels(t).forEach(l => { nRails += 2; boxes[l.box] += l.box === '22' ? 2 : 1; }));
+    });
+    for (let i = 0; i < nRails; i++) railItems.push({ len: v.T, label: 'C' });
+    const kBins = packLengths(kantItems, v.stock, v.kerf), lBins = packLengths(railItems, v.stock, v.kerf);
+    if (kBins.some(b => b.over)) msgs.push(['err', `Ein Teil ist länger als ${cmS(v.stock)} cm – Lagerlänge erhöhen oder weniger Fächer pro Modul.`]);
+    const nBox = boxes['65'] + boxes['45'] + boxes['22'];
+    const holz = kBins.length * v.pK + lBins.length * v.pL;
+    const besch = n6x120 * 0.35 + nRails * 4 * 0.06 + Math.ceil(lochband / 1000) * 1.5 + n4x35 * 0.04 + modules.length * 2 * 2.5 + nPlate * 0.3;
+    const nFach = sum(modules.map(m => m.k));
 
     plan.kpis = [
-      ['Kisten gesamt', `${nR * nC} (${nC} × ${nR})`],
-      ['Außenmaß B × H × T', `${num(Beff)} × ${num(v.H)} × ${num(v.T)}`],
-      ['Lichte Fachbreite', mm(C)],
-      ['Reihenabstand', mm(P)],
-      ['Platten', `${sheets} × ${shL}×${shW}`],
-      ['Gleitleisten', `${railBins.length} × ${v.stock} mm`],
+      ['Boxen gesamt', String(nBox)],
+      ['Boxen', `${boxes['65']}× 65 · ${boxes['45']}× 45 · ${boxes['22']}× 22`],
+      ['Module / Fächer', `${modules.length} / ${nFach}`],
+      ['Höhe × Tiefe', `${cmS(v.H)} × ${cmS(v.T)} cm`],
+      ['Holz', `${kBins.length} Kantholz · ${lBins.length} Latten`],
+      ['Material ca.', `${Math.round(holz + besch)} € (${Math.round((holz + besch) / nFach)} €/Fach)`],
     ];
 
-    // --- Zeichnung Vorderansicht ---
-    const fs = Math.max(v.H, Beff) / 32;
-    let g = '';
-    g += S.rect(0, 0, s, v.H, 'class="wood"') + S.rect(Beff - s, 0, s, v.H, 'class="wood"');
-    g += S.rect(s, 0, Beff - 2 * s, s, 'class="wood"') + S.rect(s, v.H - s, Beff - 2 * s, s, 'class="wood"');
-    for (let j = 0; j < nC; j++) {
-      const x0 = s + j * (C + s);
-      if (j > 0) g += S.rect(x0 - s, s, s, Hi, 'class="wood"');
-      rows.forEach(r => {
-        const y = v.H - s - r.railTop;
-        g += S.rect(x0, y, p, v.rh, 'class="wood2"') + S.rect(x0 + C - p, y, p, v.rh, 'class="wood2"');
-        const bx = x0 + v.spiel / 2;
-        if (v.lid) g += S.rect(bx - 2, y - v.rimT - v.lid, rimW + 4, v.lid, 'class="boxrim"');
-        g += S.rect(bx, y - v.rimT, rimW, v.rimT, 'class="boxrim"');
-        const bodyH = v.boxH - v.rimT, inset = v.o, taper = Math.min(12, rimW * 0.04);
-        g += S.poly([[bx + inset, y], [bx + rimW - inset, y], [bx + rimW - inset - taper, y + bodyH], [bx + inset + taper, y + bodyH]], 'class="box"');
+    // --- Grundriss ---
+    const roomD = Math.max(v.form === 'I' ? depth + 900 : 0, v.form !== 'I' ? v.Wl : 0, v.form === 'U' ? v.Wr : 0);
+    const fs = Math.max(v.Wb, roomD) / 32;
+    let g = S.rect(0, 0, v.Wb, roomD, 'fill="#fffdf8" stroke="none"');
+    g += S.line(0, 0, v.Wb, 0, 'stroke="#333" stroke-width="6"');
+    if (v.form !== 'I') g += S.line(0, 0, 0, v.Wl, 'stroke="#333" stroke-width="6"');
+    if (v.form === 'U') g += S.line(v.Wb, 0, v.Wb, v.Wr, 'stroke="#333" stroke-width="6"');
+    const drawRow = (r, horiz, x0, y0, dir) => {
+      let pos = 0;
+      r.mods.forEach(k => {
+        const L = kb + k * raster;
+        const rx = horiz ? x0 + pos : x0, ry = horiz ? y0 : y0 + pos;
+        g += S.rect(rx, ry, horiz ? L : v.T, horiz ? v.T : L, 'class="wood"');
+        for (let j = 0; j <= k; j++) {
+          const p = pos + j * raster;
+          g += horiz ? S.rect(x0 + p, y0, kb, v.kt, 'class="wood2"') + S.rect(x0 + p, y0 + v.T - v.kt, kb, v.kt, 'class="wood2"')
+            : S.rect(x0, y0 + p, v.kt, kb, 'class="wood2"') + S.rect(x0 + v.T - v.kt, y0 + p, v.kt, kb, 'class="wood2"');
+        }
+        const cx = horiz ? rx + L / 2 : rx + v.T / 2, cy = horiz ? ry + v.T / 2 : ry + L / 2;
+        g += `<text x="${cx}" y="${cy}" font-size="${fs * 0.75}" text-anchor="middle" ${horiz ? '' : `transform="rotate(-90 ${cx} ${cy})"`}>${k} Fächer · ${cmS(L)}</text>`;
+        pos += L;
       });
-      if (j === 0) g += dimH(x0, x0 + C, v.H + fs * 1.6, num(C), fs);
+    };
+    const corner = (x, y) => { g += S.rect(x, y, depth, depth, 'fill="#f3f0ea" stroke="#9aa3ad" stroke-dasharray="8 6"'); g += S.text(x + depth / 2, y + depth / 2 + fs * 0.3, 'frei', `font-size="${fs * 0.7}" text-anchor="middle" class="lbl"`); };
+    if (v.form === 'I') drawRow(rows[0], true, 15, v.wallGap);
+    if (v.form === 'L') { corner(0, 0); drawRow(rows[0], true, depth, v.wallGap); drawRow(rows[1], false, v.wallGap, depth); }
+    if (v.form === 'U') {
+      corner(0, 0); corner(v.Wb - depth, 0);
+      drawRow(rows[0], true, depth, v.wallGap); drawRow(rows[1], false, v.wallGap, depth); drawRow(rows[2], false, v.Wb - depth, depth);
+      g += dimH(depth, v.Wb - depth, depth + fs * 4, `Gang ${cmS(v.Wb - 2 * depth)}`, fs);
     }
-    g += dimH(0, Beff, -fs * 0.8, `B ${num(Beff)}`, fs);
-    g += dimV(0, v.H, -fs * 0.9, `H ${num(v.H)}`, fs);
-    if (nR > 1) g += dimV(v.H - s - rows[0].railTop, v.H - s - rows[1].railTop, Beff + fs * 1.2, `${num(P)}`, fs);
-    const front = drawing(-fs * 2.4, -fs * 2.4, Beff + fs * 4.4, v.H + fs * 4.8, g, 'Vorderansicht mit Kisten (Gleitleisten dunkel)');
+    g += dimH(0, v.Wb, -fs * 0.9, `Rückwand ${cmS(v.Wb)}`, fs);
+    if (v.form !== 'I') g += dimV(0, v.Wl, -fs * 0.9, `${cmS(v.Wl)}`, fs);
+    const grund = drawing(-fs * 2.2, -fs * 2.4, v.Wb + fs * 4.4, roomD + fs * 3.4, g, 'Grundriss (Draufsicht, Maße in cm). Dunkel = Pfosten vorne und hinten. In den Ecken bleibt ein Feld frei – dort ließe sich keine Box herausziehen.');
 
-    // --- Zeichnung Seitenwand (Innenseite) ---
-    const fs2 = Math.max(v.H, v.T) / 30;
-    let g2 = S.rect(0, 0, v.T, v.H, 'class="wood"');
-    g2 += S.rect(0, 0, v.T, s, 'class="ghost"') + S.rect(0, v.H - s, v.T, s, 'class="ghost"');
-    g2 += S.text(v.T / 2, s * 0.75, 'Deckel', `font-size="${fs2 * 0.6}" text-anchor="middle" class="lbl"`);
-    g2 += S.text(v.T / 2, v.H - s * 0.25, 'Boden', `font-size="${fs2 * 0.6}" text-anchor="middle" class="lbl"`);
-    rows.forEach((r, i) => {
-      const y = r.fromPanelTop;
-      g2 += S.rect(setback, y, L, v.rh, 'class="wood2"');
-      holes.forEach(hx => { g2 += S.circle(setback + hx, y + v.rh / 2, Math.max(2, v.rh / 6), 'class="hole"'); });
-      if (i === 0) g2 += dimV(0, y, -fs2 * 0.6, `${num(startLehre)}`, fs2 * 0.7);
-      else g2 += dimV(rows[i - 1].fromPanelTop + v.rh, y, -fs2 * 0.6, `${num(zwLehre)}`, fs2 * 0.7);
+    // --- Vorderansicht je unterschiedlichem Modul ---
+    const seen = new Set(), fronts = [];
+    modules.forEach(m => {
+      const key = m.types.join('');
+      if (seen.has(key) || fronts.length >= 3) return;
+      seen.add(key);
+      const f2 = Math.max(m.len, v.H) / 30;
+      let h = S.rect(0, 0, m.len, kb, 'class="wood2"') + S.rect(0, v.H - kb, m.len, kb, 'class="wood2"');
+      for (let j = 0; j <= m.k; j++) h += S.rect(j * raster, kb, kb, postLen, 'class="wood2"');
+      m.types.forEach((t, j) => {
+        const x0 = kb + j * raster;
+        fachLevels(t).forEach(l => {
+          const y = v.H - l.top, r = l.box === '65' ? v.r65 : v.r28;
+          h += S.rect(x0 + gap / 2 - 195, y - 15, 390, r + 15, 'class="box"');
+          h += S.rect(x0 + gap / 2 - 195, y - 15, 390, 15, 'class="boxrim"');
+          h += S.rect(x0, y, v.lt, v.lh, 'fill="#111"') + S.rect(x0 + gap - v.lt, y, v.lt, v.lh, 'fill="#111"');
+          h += S.text(x0 + gap / 2, y + r / 2 + f2 * 0.3, BOXLBL[l.box], `font-size="${f2 * 0.7}" text-anchor="middle" class="lbl"`);
+        });
+        h += S.text(x0 + gap / 2, v.H + f2 * 1.1, t, `font-size="${f2 * 0.9}" text-anchor="middle" font-weight="700"`);
+      });
+      h += dimH(0, m.len, -f2 * 0.8, `${cmS(m.len)} = ${cmS(kb)} + ${m.k} × ${cmS(raster)}`, f2 * 0.8);
+      h += dimV(0, v.H, -f2 * 0.9, cmS(v.H), f2 * 0.8);
+      h += dimH(kb, kb + gap, v.H + f2 * 2.6, cmS(v.clear) + ' licht', f2 * 0.7);
+      fronts.push(drawing(-f2 * 2.2, -f2 * 2.2, m.len + f2 * 3.4, v.H + f2 * 5.2, h, `Vorderansicht Modul ${m.types.join(' ')} (${m.row}). Schwarz = Schienen, auf ihnen hängen die Boxen mit dem Rand.`));
     });
-    cornerHoles.forEach(hx => { g2 += S.circle(hx, s / 2, Math.max(2, s / 6), 'class="hole"') + S.circle(hx, v.H - s / 2, Math.max(2, s / 6), 'class="hole"'); });
-    g2 += dimH(0, v.T, -fs2 * 0.6, `T ${num(v.T)}`, fs2 * 0.8);
-    g2 += dimH(setback, setback + L, v.H + fs2 * 1.2, `Leiste ${num(L)}`, fs2 * 0.7);
-    g2 += S.text(0, v.H + fs2 * 2.4, '◄ vorne', `font-size="${fs2 * 0.6}" class="lbl"`);
-    const side = drawing(-fs2 * 2, -fs2 * 1.6, v.T + fs2 * 3, v.H + fs2 * 4.4, g2, 'Seitenwand von innen: Lage der Gleitleisten. Oberstes Maß = Startlehre, die übrigen = Zwischenlehre');
 
-    plan.drawings = [front, side];
-    plan.parts = parts;
-    plan.cutplan = cutplan;
+    // Fach-Tabelle wie im Plan
+    let ft = '<div class="tablewrap"><table><tr><th>Fach</th><th>Platten von unten</th><th>Schienen-Oberkante ab Boden (cm)</th><th>Boxen</th></tr>';
+    types0.forEach(t => {
+      const lv = fachLevels(t);
+      const cnt = { '65': 0, '45': 0, '22': 0 };
+      lv.forEach(l => { cnt[l.box] += l.box === '22' ? 2 : 1; });
+      ft += `<tr><td><b>${t}</b></td><td>${lv.map(l => l.plate).join('')}</td><td>${lv.map(l => cmS(l.top)).join(' · ')}</td><td>${Object.entries(cnt).filter(e => e[1]).map(e => `${e[1]}× ${e[0]}`).join(' + ')}</td></tr>`;
+    });
+    ft += `</table></div><p class="note">Pfostenabstand (Raster) ${cmS(raster)} · lichte Weite zwischen den Schienen ${cmS(v.clear)} · Regaltiefe ${cmS(v.T)} · Wandabstand ${cmS(v.wallGap)} · Schienen je Fach: ${types0.map(t => `${t} ${2 * fachLevels(t).length}`).join(' · ')}</p>`;
+    let mt = '<div class="tablewrap"><table><tr><th>Modul</th><th>Wand</th><th class="n">Fächer</th><th class="n">Länge</th><th>Belegung</th></tr>';
+    modules.forEach((m, i) => { mt += `<tr><td>${i + 1}</td><td>${esc(m.row)}</td><td class="n">${m.k}</td><td class="n">${cmS(m.len)}</td><td>${m.types.join(' ')}</td></tr>`; });
+    mt += '</table></div>';
+    plan.drawings = [grund, ...fronts];
+    plan.afterDrawings = '<h3>Module</h3>' + mt + '<h3>Fächer: Platten &amp; Schienenhöhen</h3>' + ft;
+
+    // Teile
+    const balkenLens = [...new Set(modules.map(m => m.len))];
+    plan.parts = [
+      ...balkenLens.map(L => ({ name: 'A Balken', qty: 4 * modules.filter(m => m.len === L).length, l: L, b: v.kt, t: kb, mat: 'Kantholz sägerau', note: '2 je Rahmen, flach' })),
+      { name: 'B Pfosten', qty: nPosts, l: postLen, b: v.kt, t: kb, mat: 'Kantholz sägerau', note: 'zwischen den Balken' },
+      { name: 'C Schiene', qty: nRails, l: v.T, b: v.lh, t: v.lt, mat: 'Dachlatte sägerau', note: 'verbindet vorderen und hinteren Pfosten' },
+    ];
+    const sm = (v.stock / 1000).toFixed(1).replace('.', ',');
+    plan.cutplan = `<p><b>Kantholz ${sm} m → Balken (A) und Pfosten (B):</b> ${kBins.length} Hölzer.</p>` +
+      stripPlanSvg(kBins, v.stock, Math.max(60, v.kt), 99, 'Zuschnitt Kantholz (Maße in mm). Reste werden zu Abstandshölzern und Schablonen.', { group: true, name: `Kantholz ${sm} m` }) +
+      `<p><b>Dachlatten ${sm} m → Schienen (C):</b> ${lBins.length} Latten.</p>` +
+      stripPlanSvg(lBins, v.stock, v.lh, 99, 'Zuschnitt Dachlatten (Maße in mm). Lattenreste → Endanschläge.', { group: true, name: `Dachlatte ${sm} m` });
+    plan.cutplan +=
+      '';
     plan.jigs = [
-      ['Ablänglehre Gleitleiste', mm(L), `Anschlag an Kapp-/Gehrungssäge, ${nR * nC * 2} gleiche Leisten ohne Nachmessen`],
-      ['Startlehre (Distanzklotz)', mm(startLehre), 'Oberkante Seitenwand → Oberkante oberste Leiste'],
-      ['Zwischenlehre (Distanzklotz)', mm(zwLehre), 'Unterkante Leiste → Oberkante nächste Leiste (2 Stück bauen, links + rechts)'],
-      ['Fachlehre (Abstandsbrett)', mm(C), 'Lichter Abstand der Zwischenwände beim Verschrauben'],
-      ['Bohrschablone Gleitleiste A/B', `${holes.length} Löcher`, 'Papier 1:1 – siehe unten. B ist um 25 mm versetzt, damit sich Schrauben in der Zwischenwand nicht treffen'],
-      ['Eck-Bohrschablone', `${nJ} Löcher, ${mm(s / 2)} vom Rand`, 'Papier 1:1 – Seitenwand → Boden/Deckel'],
+      ['Maßlatten mit Endanschlag', [v.T, ...balkenLens, postLen].map(cmS).join(' · ') + ' cm', 'je eine pro Länge – danach wird nicht mehr gemessen, immer am frischen Ende anlegen'],
+      ['Abstandsplatte A', cmS(plates.A) + ' cm', 'erste Schiene für 45/22 l (vom Balken aus)'],
+      ['Abstandsplatte B', cmS(plates.B) + ' cm', 'nächste Schiene für 45/22 l (von der Schiene darunter)'],
+      ['Abstandsplatte C', cmS(plates.C) + ' cm', 'erste Schiene für 65 l (vom Balken aus)'],
+      ['Abstandsplatte D', cmS(plates.D) + ' cm', 'nächste Schiene für 65 l'],
+      ['', '', `Platten aus OSB 15 mm, ca. ${cmS(v.T + 60)} cm breit, innen 2 Leisten ${cmS(v.T)} cm auseinander – sie stehen auf vorderem und hinterem Balken bzw. Schiene`],
+      ['Abstandsholz (2 Stk mit Haltern)', cmS(gap) + ' cm', 'Pfostenabstand beim Rahmenbau – aus Balkenresten'],
+      ['Schraubschablone A/B', '1:1 Papier', 'Vorbohren der Schienen-Enden, siehe unten'],
+      ['Prüfstab', cmS(v.clear) + ' cm', 'muss leicht zwischen den Schienen durchgehen'],
     ];
-    const totalRail = nR * nC * 2 * L;
     plan.buy = [
-      [`Platte ${s} mm (Multiplex, Birke oder Spanplatte)`, `${sheets} Platte(n)`, `${shL} × ${shW} mm, Zuschnitt siehe Plan`],
-      [`Leiste ${v.rh} × ${p} mm`, `${railBins.length} × ${v.stock} mm`, `gesamt ${cm2m(totalRail)} + Verschnitt`],
-      [`Spax Senkkopf 3,5 × ${screwLen}`, `${Math.ceil(railScrews * 1.1)} Stk`, 'für Gleitleisten'],
-      ['Spax Senkkopf 4 × 50', `${Math.ceil(carcassScrews * 1.1)} Stk`, 'für den Korpus'],
-      ...(back ? [['HDF-Rückwand 3 mm', '1 Stk', `${num(Beff)} × ${num(v.H)} mm zuschneiden lassen`], ['Nägel/Klammern 25 mm', `ca. ${Math.ceil((2 * (Beff + v.H)) / 100 + (nC - 1) * v.H / 150)} Stk`, 'alle 10 cm']] : []),
-      ['Holzleim (D3)', '1 Flasche', 'Leisten zusätzlich leimen'],
-      ['Kippsicherung: 2 Winkel + Dübel/Schrauben', '1 Satz', 'Regal immer an der Wand sichern!'],
-      [`${SAMLA[v.box] && SAMLA[v.box].L ? SAMLA[v.box].name : 'Kisten'}`, `${nR * nC} Stk`, ''],
-    ];
+      [`Kantholz sägerau ${v.kt} × ${kb} mm, ${(v.stock / 1000).toFixed(1).replace('.', ',')} m`, `${kBins.length} Stk`, `A + B · ca. ${Math.round(kBins.length * v.pK)} €`],
+      [`Dachlatte sägerau ${v.lh} × ${v.lt} mm, ${(v.stock / 1000).toFixed(1).replace('.', ',')} m`, `${lBins.length} Stk`, `C · ca. ${Math.round(lBins.length * v.pL)} €`],
+      ['Holzschraube 6 × 120, Teilgewinde, Torx', `${n6x120} Stk`, 'Balken an Pfosten, 2 je Verbindung'],
+      ['Holzschraube 4,5 × 60, Torx', `${nRails * 4} Stk`, 'Schienen, 2 je Ende'],
+      ['Lochband 20 mm verzinkt', `${Math.ceil(lochband / 1000)} m`, 'eine Diagonale je Rahmen'],
+      ['Holzschraube 4 × 35, Torx', `${n4x35} Stk`, 'Lochband'],
+      ['Winkelverbinder 90 × 90 × 40', `${modules.length * 2} Stk`, 'Wandanker, 2 je Modul'],
+      ['Dübel 8 mm + Schraube 6 × 60', `${modules.length * 2} Stk`, 'passend zur Wand'],
+      ['Unterlegplatte Kunststoff 3–5 mm', `${nPlate} Stk`, 'unter die Bodenbalken'],
+      ['OSB 15 mm Reste', '–', 'für die Abstandsplatten A–D'],
+      ['IKEA SAMLA mit Deckel 65 l (57×39×42)', `${boxes['65']} Stk`, ''],
+      ['IKEA SAMLA mit Deckel 45 l (57×39×28)', `${boxes['45']} Stk`, ''],
+      ['IKEA SAMLA mit Deckel 22 l (39×28×28)', `${boxes['22']} Stk`, ''],
+    ].filter(r => !/SAMLA/.test(r[0]) || parseInt(r[1]) > 0);
     plan.steps = [
-      `<b>Platten zuschneiden:</b> Im Baumarkt zuerst Streifen in Regaltiefe ${mm(v.T)} schneiden lassen, dann nach Zuschnittplan ablängen. Seitenwände ${mm(v.H)}, Boden/Deckel ${mm(Beff - 2 * s)}${nC > 1 ? `, Zwischenwände ${mm(Hi)}` : ''}.`,
-      `<b>Lehren bauen:</b> Aus Reststücken Startlehre ${mm(startLehre)}, 2× Zwischenlehre ${mm(zwLehre)} und Fachlehre ${mm(C)} exakt ablängen. Maße mit Messschieber prüfen – jeder Fehler wiederholt sich in jeder Reihe.`,
-      `<b>Gleitleisten ablängen:</b> Ablänglehre/Anschlag auf ${mm(L)} einstellen, ${nR * nC * 2} Leisten kappen. Kanten leicht brechen, Oberseite evtl. mit Kerze/Wachs einreiben – dann gleiten die Kisten besser.`,
-      `<b>Leisten vorbohren:</b> Bohrschablone ausdrucken, auf die Leiste kleben. Bohrbild <b>A</b> für alle Leisten an den Außenseiten und an der linken Seite jeder Zwischenwand, Bohrbild <b>B</b> (25 mm versetzt) für die rechte Seite der Zwischenwände. Ø 3,5 mm durchbohren, ansenken.`,
-      `<b>Seiten markieren:</b> Seitenwände und Zwischenwände flach hinlegen, Oberkante und Vorderkante mit Bleistift markieren. Linke und rechte Seitenwand sind <b>spiegelbildlich</b> – Leisten kommen immer auf die Innenseite!`,
-      `<b>Leisten montieren:</b> Startlehre an die Oberkante anlegen, erste Leiste darunter anlegen, vorne ${mm(setback)} zurückgesetzt. Leim auftragen, mit ${screwLen} mm Schrauben fixieren. Dann Zwischenlehre auf die Leiste stellen, nächste Leiste darunter – und so weiter. Bei Zwischenwänden beide Seiten bestücken (A links, B rechts). Hinweis: Bei Zwischenwänden ist die „Oberkante“ die Kante, die später am Deckel anliegt – Startlehre dort um ${mm(s)} kürzer (${mm(startLehre - s)}).`,
-      `<b>Korpus vorbohren:</b> Eck-Bohrschablone an Ober- und Unterkante der Seitenwände anlegen, Ø 4 mm vorbohren und ansenken. Für die Zwischenwände dieselbe Schablone auf Deckel und Boden verwenden – Position mit der Fachlehre bestimmen.`,
-      `<b>Korpus verschrauben:</b> Boden und Deckel zwischen die Seitenwände setzen und mit 4 × 50 verschrauben. Zwischenwände mit der Fachlehre (${mm(C)}) ausrichten und durch Deckel und Boden verschrauben.`,
-      back ? `<b>Rechtwinklig stellen:</b> Diagonalen messen – sind beide gleich lang, ist das Regal rechtwinklig. Dann HDF-Rückwand aufnageln (alle 10 cm, auch in die Zwischenwände).` : `<b>Rechtwinklig stellen:</b> Diagonalen messen, beide müssen gleich lang sein. Anschlagklötze hinten auf je eine Gleitleiste pro Fach leimen, damit die Kisten nicht hinten herausrutschen.`,
-      `<b>Aufstellen:</b> Regal mit 2 Winkeln an der Wand sichern (Kippgefahr bei vollen, ausgezogenen Kisten!). Kisten einschieben, Leichtgängigkeit testen.`,
+      `<b>Schablonen bauen</b> (einmal, aus Resten): Maßlatten mit Endanschlag für ${[v.T, ...balkenLens, postLen].map(cmS).join(' / ')} cm, Abstandsplatten A–D, 2 Abstandshölzer ${cmS(gap)} cm, Prüfstab ${cmS(v.clear)} cm. Schraubschablone ausdrucken und auf ein Reststück kleben.`,
+      `<b>Zuschneiden:</b> ${nBalken} Balken, ${nPosts} Pfosten à ${cmS(postLen)} cm, ${nRails} Schienen à ${cmS(v.T)} cm – immer mit der Maßlatte am frischen Ende.`,
+      `<b>Rahmen liegend bauen:</b> 2 Balken flach hinlegen, ersten Pfosten bündig mit den Enden. Abstandshölzer einhängen, nächsten Pfosten dagegen, mit 2 × 6 × 120 je Ende verschrauben – bis zum letzten. Der muss wieder bündig sein. Pro Modul 2 Rahmen.`,
+      `<b>Rechtwinklig prüfen, Lochband:</b> Beide Diagonalen messen – gleich lang = rechtwinklig. Eine Diagonale Lochband auf die Rückseite (10 × 4 × 35). Zweiten Rahmen genauso.`,
+      `<b>Aufstellen:</b> Unterlegplatten unterlegen. Hinteren Rahmen mit ${cmS(v.wallGap)} cm Wandabstand aufrichten, vorderen ${cmS(v.T)} cm davor. Zwinge oder Helfer hält ihn.`,
+      `<b>Schienen von unten nach oben:</b> Abstandsplatte laut Tabelle (z. B. Fach G: ${fachLevels('G').map(l => l.plate).join('')}) auf den Balken bzw. die untere Schiene stellen, Schiene oben auflegen, mit der Schraubschablone vorbohren (Ø 3 mm), 2 Schrauben 4,5 × 60 je Ende. Linke Schiene eines Fachs Bohrbild A, rechte B – so treffen sich die Schrauben im Pfosten nicht. Platte herausziehen, nächste. Erst links bis oben, dann rechts.`,
+      `<b>An der Wand sichern:</b> Oben 2 Winkel je Modul in die Wand dübeln. Mehrere Module: benachbarte Pfosten verschrauben${v.form !== 'I' ? ', in den Ecken oben einen Kantholz-Rest über die Stoßkante legen und verschrauben' : ''}.`,
+      `<b>Boxen einhängen:</b> Prüfstab ${cmS(v.clear)} cm zwischen die Schienen halten – er muss leicht durchgehen. Schienen-Oberkanten kurz anschleifen (K80). Schweres nach unten, max. ca. 15 kg je Box.`,
     ];
+    msgs.push(['info', 'Sicherheit: Jedes Modul oben an der Wand sichern. Vor dem Bohren Leitungen prüfen. Im Keller Unterlegplatten verwenden und das Holz einige Tage akklimatisieren. Entwurf – Maße am ersten Fach mit echten Boxen testen.']);
 
-    // --- Schablonen ---
-    const rail = (pat, y0) => {
-      let b = S.rect(0, y0, L, v.rh, 'fill="none" stroke="#000" stroke-width="0.3"');
-      b += S.text(4, y0 - 2, `Bohrbild ${pat} – Leiste ${num(L)} × ${num(v.rh)} (vorne = links)`, 'font-size="3.5"');
-      (pat === 'A' ? holes : holesB).forEach(hx => { b += holeMark(hx, y0 + v.rh / 2, 3.5); b += S.text(hx, y0 + v.rh + 4, num(hx), 'font-size="3" text-anchor="middle"'); });
+    // Schraubschablone 1:1
+    const sw = 100, sh = v.lh;
+    const tpl = (pat, y0) => {
+      let b = S.rect(0, y0, sw, sh, 'fill="none" stroke="#000" stroke-width="0.3"');
+      b += S.line(0, y0, sw, y0, 'stroke="#000" stroke-width="1"') + S.line(sw, y0, sw, y0 + sh, 'stroke="#000" stroke-width="1"');
+      b += S.text(2, y0 - 2, `Bohrbild ${pat} – ${pat === 'A' ? 'linke' : 'rechte'} Schiene eines Fachs · Anschlag oben + Ende (dick)`, 'font-size="3"');
+      const pts = pat === 'A' ? [[sw - 20, 15], [sw - 58, 35]] : [[sw - 58, 15], [sw - 20, 35]];
+      pts.forEach(([x, y]) => { b += holeMark(x, y0 + y, 3); });
+      b += S.text(sw - 20, y0 + sh + 4, '2,0', 'font-size="2.6" text-anchor="middle"') + S.text(sw - 58, y0 + sh + 4, '5,8', 'font-size="2.6" text-anchor="middle"');
+      b += S.text(sw + 2, y0 + 16, '1,5', 'font-size="2.6"') + S.text(sw + 2, y0 + 36, '3,5', 'font-size="2.6"');
       return b;
     };
-    const tH = 2 * v.rh + 30;
-    const tpls = [{ title: 'Bohrschablone Gleitleiste A + B', w: L + 2, h: tH, body: rail('A', 8) + rail('B', 8 + v.rh + 14), hint: 'ausschneiden, auf die Leiste kleben, ankörnen' }];
-    let cb = S.rect(0, 10, v.T, 30, 'fill="none" stroke="#000" stroke-width="0.3"');
-    cb += S.line(0, 10, v.T, 10, 'stroke="#000" stroke-width="0.8"');
-    cb += S.text(2, 7, `Eck-Bohrschablone – dicke Linie an Ober-/Unterkante Seitenwand anlegen, vorne = links. Löcher Ø 4, ${num(s / 2)} mm von der Kante`, 'font-size="3"');
-    cornerHoles.forEach(hx => { cb += holeMark(hx, 10 + s / 2, 4); cb += S.text(hx, 10 + s / 2 + 8, num(hx), 'font-size="3" text-anchor="middle"'); });
-    tpls.push({ title: 'Eck-Bohrschablone Korpus', w: v.T + 2, h: 45, body: cb });
-    plan.templates = tpls;
+    plan.templates = [{ title: 'Schraubschablone Schienen-Ende A/B', w: 120, h: 2 * sh + 40, body: tpl('A', 10) + tpl('B', 10 + sh + 20), hint: 'an beiden Schienen-Enden verwenden, immer vom Ende aus' }];
     return plan;
   },
 };
@@ -908,7 +996,7 @@ const toolJigs = {
 /* =====================================================================
    App-Rahmen: Formular, Speicherung, Tabs
    ===================================================================== */
-const TOOLS = [toolSamla, toolCleat, toolJigs];
+const TOOLS = [toolBoxen, toolCleat, toolJigs];
 const STORE = 'bauplan-app-v1';
 let state = {};
 try { state = JSON.parse(localStorage.getItem(STORE)) || {}; } catch (e) { state = {}; }
