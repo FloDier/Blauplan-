@@ -346,6 +346,47 @@ function renderPlan(plan) {
   return h;
 }
 
+/* ---------- 3D-Ansicht (isometrisch, als SVG – druckt auch ins PDF) ---------- */
+// Quader: { x0,x1,y0,y1,z0,z1, c: Farbe }  (x entlang Rückwand, y in den Raum, z nach oben)
+const ISO_VIEWS = { vr: 0, vl: -90, hl: 180, hr: 90 };
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = k => clamp(Math.round(((n >> k) & 255) * f), 0, 255);
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+function iso3dSvg(cubes, room, view, caption) {
+  const ang = (ISO_VIEWS[view] || 0) * Math.PI / 180, co = Math.round(Math.cos(ang)), si = Math.round(Math.sin(ang));
+  const cx = room.w / 2, cy = room.d / 2;
+  const rot = (x, y) => [co * (x - cx) - si * (y - cy), si * (x - cx) + co * (y - cy)];
+  const C30 = Math.cos(Math.PI / 6), S30 = 0.5;
+  const P = (x, y, z) => [(x - y) * C30, (x + y) * S30 - z];
+  // lange Teile in Stücke teilen, damit die Zeichenreihenfolge stimmt
+  const MAXL = 160, parts = [];
+  cubes.forEach(c => {
+    const [ax, ay] = rot(c.x0, c.y0), [bx, by] = rot(c.x1, c.y1);
+    const X0 = Math.min(ax, bx), X1 = Math.max(ax, bx), Y0 = Math.min(ay, by), Y1 = Math.max(ay, by);
+    const nx = Math.max(1, Math.ceil((X1 - X0) / MAXL)), ny = Math.max(1, Math.ceil((Y1 - Y0) / MAXL));
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) parts.push({
+      x0: X0 + (X1 - X0) * i / nx, x1: X0 + (X1 - X0) * (i + 1) / nx,
+      y0: Y0 + (Y1 - Y0) * j / ny, y1: Y0 + (Y1 - Y0) * (j + 1) / ny, z0: c.z0, z1: c.z1, c: c.c,
+    });
+  });
+  parts.sort((a, b) => (a.x0 + a.x1 + a.y0 + a.y1) - (b.x0 + b.x1 + b.y0 + b.y1) || a.z0 - b.z0);
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  const pts = arr => arr.map(([x, y, z]) => { const [px, py] = P(x, y, z); minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py); return `${px.toFixed(1)},${py.toFixed(1)}`; }).join(' ');
+  // Boden
+  const fl = [[0, 0], [room.w, 0], [room.w, room.d], [0, room.d]].map(([x, y]) => rot(x, y));
+  let g = `<polygon points="${pts(fl.map(([x, y]) => [x, y, 0]))}" fill="#ece6da" stroke="#b9b0a0"/>`;
+  parts.forEach(p => {
+    const { x0, x1, y0, y1, z0, z1 } = p;
+    g += `<polygon points="${pts([[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]])}" fill="${shade(p.c, 0.78)}"/>`;
+    g += `<polygon points="${pts([[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]])}" fill="${shade(p.c, 0.9)}"/>`;
+    g += `<polygon points="${pts([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]])}" fill="${shade(p.c, 1.05)}"/>`;
+  });
+  const pad = 40;
+  return `<figure class="drw iso"><svg viewBox="${(minX - pad).toFixed(0)} ${(minY - pad).toFixed(0)} ${(maxX - minX + 2 * pad).toFixed(0)} ${(maxY - minY + 2 * pad).toFixed(0)}" xmlns="http://www.w3.org/2000/svg">${g}</svg><figcaption>${esc(caption)}</figcaption></figure>`;
+}
+
 /* =====================================================================
    TOOL 1: Regal-Planer (Kantholz-Rahmen + Dachlatten)
    System nach „das boxenregal – Bauplan v0.1“, erweitert um
@@ -378,7 +419,9 @@ function regalGeo(v) {
   return {
     kb, sgap, raster: sgap + kb, postLen: v.H - 2 * kb, maxTop: v.H - kb - v.head,
     depth: v.T + v.wallGap,
-    plates: { A: v.r28 - 38, B: v.r28 - 1, C: v.r65 - 38, D: v.r65 - 1 },
+    // erste Platte gleicht die Balkenhöhe aus → Schienenhöhen bleiben bei jedem Querschnitt gleich
+    plates: { A: v.r28 + 20 - kb, B: v.r28 - 1, C: v.r65 + 20 - kb, D: v.r65 - 1 },
+    hole2: Math.min(58, v.kt - 18), slim: v.kt < 70,
   };
 }
 const fachW = (f, G) => f.t === 'samla' ? G.sgap : Math.max(100, f.w || 0);
@@ -512,10 +555,13 @@ const toolRegal = {
     { g: '2 · Raum & Maße', id: 'inselL', label: 'Insel-Länge', def: 0, unit: 'mm', help: '0 = automatisch', show: v => v.insel !== 'none' },
     { g: '2 · Raum & Maße', id: 'inselH', label: 'Insel-Höhe', def: 0, unit: 'mm', help: '0 = automatisch (kippsicher)', show: v => v.insel !== 'none' },
     { g: '3 · Vorlage', id: 'vorlage', label: 'Fächer automatisch füllen mit', type: 'select', def: 'keller', options: [['keller', 'Kellerplan: G G Schrank M / G M K K'], ['boxen', 'nur SAMLA-Boxen'], ['boeden', 'nur Böden'], ['mix', 'Mix: Böden + Boxen']] },
+    { g: '5 · 3D-Ansicht', id: 'view3d', label: 'Blickrichtung', type: 'select', def: 'vr', options: [['vr', 'von vorne rechts'], ['vl', 'von vorne links'], ['hl', 'von hinten links'], ['hr', 'von hinten rechts'], ['off', 'aus']] },
     { g: 'Boxen (selbst messen!)', id: 'r65', label: 'Randmaß r 65 l', def: 411, unit: 'mm', help: 'Boxboden bis Unterkante Rand' },
     { g: 'Boxen (selbst messen!)', id: 'r28', label: 'Randmaß r 45/22 l', def: 271, unit: 'mm' },
     { g: 'Boxen (selbst messen!)', id: 'clear', label: 'Lichte Weite Schienen', def: 365, unit: 'mm' },
-    { g: 'Holz', id: 'kb', label: 'Kantholz sichtbare Breite', def: 58, unit: 'mm', help: 'Kantholz 78 × 58' },
+    { g: 'Holz', id: 'qs', label: 'Kantholz-Querschnitt', type: 'select', def: '78x58', options: [['78x58', '78 × 58 (Hauptplan)'], ['58x38', '58 × 38 (Variante B, schlanker)']],
+      onchange: (val, set) => { if (val === '58x38') { set('kb', 38); set('kt', 58); set('pK', 4.73); } else { set('kb', 58); set('kt', 78); set('pK', 9.98); } } },
+    { g: 'Holz', id: 'kb', label: 'Kantholz sichtbare Breite', def: 58, unit: 'mm', help: 'Seite nach vorne' },
     { g: 'Holz', id: 'kt', label: 'Kantholz Tiefe', def: 78, unit: 'mm' },
     { g: 'Holz', id: 'lh', label: 'Dachlatte Höhe', def: 50, unit: 'mm' },
     { g: 'Holz', id: 'lt', label: 'Dachlatte Stärke', def: 30, unit: 'mm' },
@@ -752,7 +798,56 @@ const toolRegal = {
       h += dimV(0, H, -f2 * 0.9, cmS(H), f2 * 0.8);
       fronts.push(drawing(-f2 * 2.2, -f2 * 2.2, total + f2 * 3.4, H + f2 * 3.8, h, `Vorderansicht ${ROWDEF[r.key]}${r.mult === 2 ? ' (beide Seiten)' : ''} – Maße über den Modulen = Balkenlänge`));
     });
-    plan.drawings = [grund, ...fronts];
+
+    // ---- 3D-Quader ----
+    let iso = '';
+    if (v.view3d !== 'off') {
+      const cubes = [], COL = { wood: '#c99a5c', rail: '#4a4a4a', b65: '#b9cde6', b45: '#cfdcec', b22: '#dde6f1', osb: '#e7cf9f', sch: '#f3f1ec', door: '#fbfbf8' };
+      const place = (r, side) => {
+        const I = R.insel;
+        if (r.key === 'back') { const ox = v.form === 'I' ? 15 : G.depth; return (a0, a1, c0, c1) => [ox + a0, ox + a1, v.wallGap + c0, v.wallGap + c1]; }
+        if (r.key === 'left') return (a0, a1, c0, c1) => [v.wallGap + c0, v.wallGap + c1, G.depth + a0, G.depth + a1];
+        if (r.key === 'right') return (a0, a1, c0, c1) => [v.Wb - v.wallGap - c1, v.Wb - v.wallGap - c0, G.depth + a0, G.depth + a1];
+        const xl = I.cx - I.iDepth / 2, xr = I.cx + I.iDepth / 2;
+        return side === 1 ? (a0, a1, c0, c1) => [xr - c1, xr - c0, I.y0 + a0, I.y0 + a1] : (a0, a1, c0, c1) => [xl + c0, xl + c1, I.y0 + a0, I.y0 + a1];
+      };
+      R.rows.forEach(r => {
+        const gg = geoFor(r.key), H = r.key === 'insel' ? inselH : v.H, T = v.T, kt = v.kt, k = gg.kb;
+        for (let side = 0; side < (r.mult || 1); side++) {
+          const m = place(r, side);
+          const add = (a0, a1, c0, c1, z0, z1, c) => { const [x0, x1, y0, y1] = m(a0, a1, c0, c1); cubes.push({ x0, x1, y0, y1, z0, z1, c }); };
+          let pos = 0;
+          r.parts.forEach(p => {
+            if (p.gap) { pos += p.w; return; }
+            [[0, kt], [T - kt, T]].forEach(([c0, c1]) => { add(pos, pos + p.len, c0, c1, 0, k, COL.wood); add(pos, pos + p.len, c0, c1, H - k, H, COL.wood); });
+            let q = pos;
+            const post = qq => [[0, kt], [T - kt, T]].forEach(([c0, c1]) => add(qq, qq + k, c0, c1, k, H - k, COL.wood));
+            post(q);
+            p.items.forEach(({ f, w }) => {
+              const x0 = q + k;
+              const rails = top => { add(x0, x0 + v.lt, 0, T, top - v.lh, top, COL.rail); add(x0 + w - v.lt, x0 + w, 0, T, top - v.lh, top, COL.rail); };
+              if (f.t === 'samla') samlaLevels(f.s, v, gg).forEach(l => {
+                rails(l.top);
+                const rr = l.box === '65' ? v.r65 : v.r28, bx0 = x0 + w / 2 - 195, bx1 = x0 + w / 2 + 195;
+                if (l.box === '22') { add(bx0, bx1, T - 290, T - 10, l.top - rr, l.top + 20, COL.b22); add(bx0, bx1, T - 580, T - 300, l.top - rr, l.top + 20, COL.b22); }
+                else add(bx0, bx1, T - 580, T - 10, l.top - rr, l.top + 20, l.box === '65' ? COL.b65 : COL.b45);
+              });
+              if (f.t === 'boeden' || f.t === 'schrank') boardLevels(f.n, gg, f.t === 'schrank').forEach(top => { rails(top); add(x0, x0 + w, 5, T - 5, top, top + v.osb, COL.osb); });
+              if (f.t === 'schrank') {
+                add(x0 - k, x0 + w + k, -v.osb2, 0, 0, H, COL.sch);
+                add(x0, x0 + v.osb2, kt, T - kt, k, H - k, COL.sch); add(x0 + w - v.osb2, x0 + w, kt, T - kt, k, H - k, COL.sch);
+                add(x0 - k + 2, x0 + w + k - 2, T, T + 19, 10, H - 10, COL.door);
+              }
+              q = x0 + w; post(q);
+            });
+            pos += p.len;
+          });
+        }
+      });
+      const VN = { vr: 'von vorne rechts', vl: 'von vorne links', hl: 'von hinten links', hr: 'von hinten rechts' };
+      iso = iso3dSvg(cubes, { w: v.Wb, d: v.D }, v.view3d, `3D-Ansicht ${VN[v.view3d]} (Blickrichtung im Formular unter „5 · 3D-Ansicht“ ändern)`);
+    }
+    plan.drawings = [grund, ...(iso ? [iso] : []), ...fronts];
 
     // Tabellen
     let tb = '<div class="tablewrap"><table><tr><th>Wand</th><th>#</th><th>Fach</th><th class="n">Breite</th><th>Platten / Höhen (cm)</th><th>Inhalt</th></tr>';
@@ -808,8 +903,8 @@ const toolRegal = {
       [`Kantholz sägerau ${v.kt} × ${kb} mm, ${sm} m`, `${kBins.length} Stk`, `ca. ${Math.round(kBins.length * v.pK)} €`],
       [`Dachlatte sägerau ${v.lh} × ${v.lt} mm, ${sm} m`, `${lBins.length} Stk`, `ca. ${Math.round(lBins.length * v.pL)} €`],
       ...(osbSheets ? [[`OSB-Platte ${v.osb} / ${v.osb2} mm`, `${osbSheets} Stk`, `ca. ${Math.round(osbSheets * v.pO)} € – Stärken laut Zuschnittliste`]] : []),
-      ['Holzschraube 6 × 120 Teilgewinde', `${n6} Stk`, 'Balken an Pfosten'],
-      ['Holzschraube 4,5 × 60', `${nRailScrews} Stk`, 'Latten, 2 je Ende'],
+      [G.slim ? 'Holzschraube 5 × 100, 3 mm vorbohren' : 'Holzschraube 6 × 120 Teilgewinde', `${n6} Stk`, 'Balken an Pfosten'],
+      [G.slim ? 'Holzschraube 4 × 50' : 'Holzschraube 4,5 × 60', `${nRailScrews} Stk`, 'Latten, 2 je Ende'],
       ...(nBoardScrews ? [['Holzschraube 4 × 30', `${nBoardScrews} Stk`, 'Böden auf Latten']] : []),
       ['Lochband 20 mm', `${Math.ceil(lochband / 1000)} m`, 'Diagonale je Rahmen'],
       ['Holzschraube 4 × 35', `${n4x35} Stk`, 'Lochband'],
@@ -824,10 +919,10 @@ const toolRegal = {
     plan.steps = [
       `<b>Schablonen bauen</b> (einmal, aus Resten): Maßlatten, Abstandsplatten${nBox ? ' A–D' : ''}, Abstandshölzer für jede Fachbreite, Schraubschablone.`,
       `<b>Zuschneiden</b> laut Zuschnittliste – immer mit der Maßlatte am frischen Ende.${osbSheets ? ' OSB im Baumarkt schneiden lassen.' : ''}`,
-      `<b>Rahmen liegend bauen:</b> 2 Balken flach hinlegen, ersten Pfosten bündig. Passendes Abstandsholz für das jeweilige Fach einlegen, nächsten Pfosten dagegen, 2 × 6 × 120 je Ende. Pro Modul 2 Rahmen.`,
+      `<b>Rahmen liegend bauen:</b> 2 Balken flach hinlegen, ersten Pfosten bündig. Passendes Abstandsholz für das jeweilige Fach einlegen, nächsten Pfosten dagegen, 2 × ${G.slim ? '5 × 100 (vorbohren, Hirnholz reißt sonst)' : '6 × 120'} je Ende. Pro Modul 2 Rahmen.${G.slim ? ' Variante B ist weicher: Lochband-Diagonalen und Wandwinkel sind Pflicht.' : ''}`,
       `<b>Rechtwinklig + Lochband:</b> Diagonalen gleich lang? Dann eine Diagonale Lochband auf die Rückseite.`,
       `<b>Aufstellen:</b> Unterlegplatten unter die Balken. Hinteren Rahmen mit ${cmS(v.wallGap)} cm Wandabstand, vorderen ${cmS(v.T)} cm davor.${R.insel ? ` Insel: ${v.insel === 'dbl' ? 'zwei Regale Rücken an Rücken stellen und verschrauben, ' : ''}mit Winkeln am Boden verschrauben.` : ''}`,
-      `<b>Latten von unten nach oben:</b> Abstandsplatte auf Balken bzw. untere Latte stellen, Latte auflegen, mit Schraubschablone vorbohren, 2 × 4,5 × 60 je Ende. Linke Latte Bohrbild A, rechte B.`,
+      `<b>Latten von unten nach oben:</b> Abstandsplatte auf Balken bzw. untere Latte stellen, Latte auflegen, mit Schraubschablone vorbohren, 2 × ${G.slim ? '4 × 50' : '4,5 × 60'} je Ende. Linke Latte Bohrbild A, rechte B.`,
       ...(cnt.boeden ? [`<b>Böden:</b> OSB-Böden auf die Latten legen, je 4 Schrauben 4 × 30.${querFach.size ? ' In breiten Fächern vorher die Querlatten vorne und hinten zwischen die Pfosten schrauben (Oberkante = Oberkante Seitenlatte).' : ''}`] : []),
       ...(cnt.schrank ? [`<b>Schrank</b> (ohne Mittelpfosten – beim Rahmenbau 2 Abstandshölzer + ${cmS(kb)} cm Klotz statt Pfosten): OSB-Rückwand hinten auf den Rahmen (alle ca. 20 cm), OSB-Seiten innen an die Pfosten, 2 Latten auf ca. ${cmS(v.H - 300)} cm und Einlegeboden auflegen, Kleiderstange auf ca. ${cmS(v.H - 400)} cm, Türen ${v.doors === 'alt' ? '(die alten) ' : ''}einhängen und einstellen. Regal auf Unterlegplatten, damit die Türen nicht schleifen.`] : []),
       `<b>Sichern:</b> Wandmodule oben mit 2 Winkeln an die Wand. Benachbarte Module verschrauben${v.form !== 'I' ? ', Ecken mit Kantholz-Rest über der Stoßkante' : ''}.`,
@@ -841,8 +936,9 @@ const toolRegal = {
       let b = S.rect(0, y0, sw, sh, 'fill="none" stroke="#000" stroke-width="0.3"');
       b += S.line(0, y0, sw, y0, 'stroke="#000" stroke-width="1"') + S.line(sw, y0, sw, y0 + sh, 'stroke="#000" stroke-width="1"');
       b += S.text(2, y0 - 2, `Bohrbild ${pat} – ${pat === 'A' ? 'linke' : 'rechte'} Latte eines Fachs · Anschlag oben + Ende (dick)`, 'font-size="3"');
-      (pat === 'A' ? [[sw - 20, 15], [sw - 58, 35]] : [[sw - 58, 15], [sw - 20, 35]]).forEach(([x, y]) => { b += holeMark(x, y0 + y, 3); });
-      b += S.text(sw - 20, y0 + sh + 4, '2,0', 'font-size="2.6" text-anchor="middle"') + S.text(sw - 58, y0 + sh + 4, '5,8', 'font-size="2.6" text-anchor="middle"');
+      const h2 = G.hole2;
+      (pat === 'A' ? [[sw - 20, 15], [sw - h2, 35]] : [[sw - h2, 15], [sw - 20, 35]]).forEach(([x, y]) => { b += holeMark(x, y0 + y, 3); });
+      b += S.text(sw - 20, y0 + sh + 4, '2,0', 'font-size="2.6" text-anchor="middle"') + S.text(sw - h2, y0 + sh + 4, cmS(h2), 'font-size="2.6" text-anchor="middle"');
       b += S.text(sw + 2, y0 + 16, '1,5', 'font-size="2.6"') + S.text(sw + 2, y0 + 36, '3,5', 'font-size="2.6"');
       return b;
     };
@@ -1213,6 +1309,156 @@ const toolJigs = {
 };
 
 /* =====================================================================
+   PDF-Export (jsPDF + svg2pdf + autoTable, lokal in lib/, sonst CDN)
+   Zeichnungen bleiben Vektoren, Schablonen exakt 1:1.
+   ===================================================================== */
+const PDF_LIBS = [
+  ['lib/jspdf.umd.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js'],
+  ['lib/svg2pdf.umd.min.js', 'https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.4/dist/svg2pdf.umd.min.js'],
+  ['lib/jspdf.plugin.autotable.min.js', 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js'],
+];
+const loadScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+let pdfReady = null;
+function loadPdfLibs() {
+  if (!pdfReady) pdfReady = (async () => { for (const [a, b] of PDF_LIBS) { try { await loadScript(a); } catch (e) { await loadScript(b); } } })().catch(e => { pdfReady = null; throw e; });
+  return pdfReady;
+}
+// Standardschrift im PDF kennt nur Westeuropa-Zeichen
+const pdfTxt = s => String(s)
+  .replace(/→/g, '->').replace(/←/g, '<-').replace(/↓/g, 'v').replace(/↔/g, '<->').replace(/◄/g, '<')
+  .replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/[✓✔]/g, '').replace(/✕/g, 'x').replace(/[„“”]/g, '"').replace(/[‚‘’]/g, "'")
+  .replace(/[   ]/g, ' ').replace(/−/g, '-').replace(/[^\x00-\xFF€–—…•]/g, '');
+
+// Stile aus dem CSS fest in die SVG schreiben; Linienstärken für den Druck in mm umrechnen
+function prepSvg(svg, targetWmm) {
+  const clone = svg.cloneNode(true);
+  const vb = svg.viewBox && svg.viewBox.baseVal;
+  const upm = vb && vb.width ? vb.width / targetWmm : 1;   // Benutzereinheiten je mm
+  const src = [svg, ...svg.querySelectorAll('*')], dst = [clone, ...clone.querySelectorAll('*')];
+  src.forEach((el, i) => {
+    const cs = getComputedStyle(el), d = dst[i];
+    if (el.tagName === 'clipPath' || el.closest('defs')) return;
+    ['fill', 'stroke', 'fill-opacity', 'stroke-opacity'].forEach(p => { const val = cs.getPropertyValue(p); if (val && !d.hasAttribute(p)) d.setAttribute(p, val); });
+    const nonScaling = cs.getPropertyValue('vector-effect') === 'non-scaling-stroke';
+    const sw = parseFloat(cs.getPropertyValue('stroke-width')) || 0;
+    const da = cs.getPropertyValue('stroke-dasharray');
+    if (nonScaling) {
+      d.setAttribute('stroke-width', Math.max(0.12, sw * 0.22) * upm);
+      if (da && da !== 'none') d.setAttribute('stroke-dasharray', da.split(/[ ,]+/).map(x => (parseFloat(x) || 0) * 0.3 * upm).join(' '));
+    } else if (da && da !== 'none' && !d.hasAttribute('stroke-dasharray')) d.setAttribute('stroke-dasharray', da.replace(/px/g, ''));
+    d.removeAttribute('class'); d.removeAttribute('vector-effect');
+    if (d.tagName === 'text' || d.tagName === 'g') {
+      d.setAttribute('font-family', 'helvetica');
+      const fw = parseInt(cs.getPropertyValue('font-weight')) || 400;
+      d.setAttribute('font-weight', fw >= 600 ? 'bold' : 'normal');
+      if (d.tagName === 'text') d.textContent = pdfTxt(d.textContent);
+    }
+  });
+  clone.removeAttribute('style');
+  clone.setAttribute('font-family', 'helvetica');
+  return clone;
+}
+
+async function exportPdf(tool, root, btn) {
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'PDF wird erstellt …'; }
+  try {
+    await loadPdfLibs();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const M = 12, W = 210 - 2 * M, PH = 297;
+    let y = M;
+    const need = h => { if (y + h > PH - M) { doc.addPage(); y = M; } };
+    const text = (t, size = 10, style = 'normal', gap = 1.5, color = [31, 41, 51]) => {
+      doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(...color);
+      const lh = size * 0.3528 * 1.3;
+      doc.splitTextToSize(pdfTxt(t).trim(), W).forEach(l => { need(lh); doc.text(l, M, y + lh * 0.78); y += lh; });
+      y += gap;
+    };
+    const putSvg = async (svg, maxH = 245) => {
+      const vb = svg.viewBox.baseVal;
+      let w = W, h = W * vb.height / vb.width;
+      if (h > maxH) { h = maxH; w = h * vb.width / vb.height; }
+      need(h + 4);
+      await doc.svg(prepSvg(svg, w), { x: M + (W - w) / 2, y, width: w, height: h });
+      y += h + 2;
+    };
+    const out = root.querySelector('.out');
+    const date = new Date().toLocaleDateString('de-DE');
+    for (const el of [...out.children]) {
+      const cl = el.classList;
+      if (cl.contains('printhead')) { text(el.textContent, 18, 'bold', 1); text(`Bauplan App · erstellt am ${date} · Maße in ${tool.unit === 'cm' ? 'cm' : 'mm'}`, 8.5, 'normal', 4, [107, 114, 128]); continue; }
+      if (el.tagName === 'H2') continue;
+      if (cl.contains('summary')) { el.querySelectorAll('.kpi').forEach(k => text(`${k.querySelector('span').textContent}: ${k.querySelector('b').textContent}`, 10, 'normal', 0.5)); y += 3; continue; }
+      if (cl.contains('msg')) {
+        if (cl.contains('noprint')) continue;
+        const pre = cl.contains('err') ? 'FEHLER: ' : cl.contains('warn') ? 'Achtung: ' : 'Hinweis: ';
+        text(pre + el.textContent, 9, cl.contains('err') ? 'bold' : 'normal', 1.5, cl.contains('err') ? [138, 28, 28] : cl.contains('warn') ? [122, 75, 0] : [23, 58, 94]);
+        continue;
+      }
+      if (el.tagName === 'H3' && /Schablonen/.test(el.textContent)) continue;
+      if (el.tagName === 'H3') { need(30); y += 3; text(el.textContent, 13, 'bold', 1, [194, 65, 12]); doc.setDrawColor(194, 65, 12); doc.setLineWidth(0.4); doc.line(M, y - 1, M + W, y - 1); y += 2; continue; }
+      if (el.tagName === 'FIGURE') {
+        await putSvg(el.querySelector('svg'));
+        const cap = el.querySelector('figcaption');
+        if (cap) text(cap.textContent, 8, 'italic', 3, [107, 114, 128]);
+        continue;
+      }
+      if (cl.contains('tablewrap')) {
+        doc.autoTable({
+          html: el.querySelector('table'), startY: y, margin: { left: M, right: M },
+          styles: { font: 'helvetica', fontSize: 8, cellPadding: 1.2, textColor: [31, 41, 51], lineColor: [217, 211, 199], lineWidth: 0.1 },
+          headStyles: { fillColor: [241, 236, 226], textColor: [31, 41, 51], fontStyle: 'bold' },
+          didParseCell: d => { d.cell.text = d.cell.text.map(pdfTxt); },
+        });
+        y = doc.lastAutoTable.finalY + 3;
+        continue;
+      }
+      if (el.tagName === 'P') { text(el.textContent, 8.5, 'normal', 2, [80, 80, 80]); continue; }
+      if (el.tagName === 'OL') {
+        [...el.children].forEach((li, i) => {
+          const b = li.querySelector('b');
+          text(`${i + 1}. ${li.textContent}`, 9.5, 'normal', 1.8);
+          if (b) { /* Fettdruck nicht nötig – Nummer reicht */ }
+        });
+        continue;
+      }
+      if (cl.contains('tpls')) {
+        for (const tile of el.querySelectorAll('svg.tile')) {
+          doc.addPage();
+          await doc.svg(prepSvg(tile, 180), { x: 15, y: 12, width: 180, height: 255 });
+        }
+        y = PH;
+        continue;
+      }
+    }
+    // Seitenzahlen
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(140); doc.text(pdfTxt(`${tool.title} · Seite ${i}/${n}`), 210 - M, 292, { align: 'right' }); }
+
+    const name = `Bauplan-${tool.title.replace(/[^\wäöüÄÖÜß-]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    const blob = doc.output('blob');
+    const file = new File([blob], name, { type: 'application/pdf' });
+    let shared = false;
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); shared = true; } catch (e) { if (e && e.name === 'AbortError') shared = true; }
+    }
+    if (!shared) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    }
+    window.__lastPdf = blob;
+  } catch (e) {
+    console.error(e);
+    alert('PDF konnte nicht erstellt werden: ' + (e && e.message ? e.message : e) + '\nAlternative: „Browser-Druck“.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+
+/* =====================================================================
    App-Rahmen: Formular, Speicherung, Tabs
    ===================================================================== */
 const TOOLS = [toolRegal, toolCleat, toolJigs];
@@ -1261,7 +1507,7 @@ function buildForm(tool, el) {
     h += `</fieldset>`;
     if (tool.extraAfter === g) h += `<div class="extra"></div>`;
   }
-  h += `<div class="actions"><button class="btn" data-print="1">Plan drucken / als PDF</button><button class="btn sec" data-reset="1">Standardwerte</button></div>`;
+  h += `<div class="actions"><button class="btn" data-pdf="1">📄 Bauplan als PDF (drucken / teilen)</button><button class="btn sec" data-print="1">Browser-Druck</button><button class="btn sec" data-reset="1">Standardwerte</button></div>`;
   h += `<p class="note">Eingaben werden auf diesem Gerät gespeichert.</p>`;
   el.innerHTML = h;
 }
@@ -1319,6 +1565,7 @@ function mountTool(tool) {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.closest('.extra')) { if (tool.onExtra) { tool.onExtra(st(), b, 'click'); save(); refreshExtra(true); recalc(tool, root); } return; }
+    if (b.dataset.pdf) { exportPdf(tool, root, b); return; }
     if (b.dataset.print) { window.print(); return; }
     if (b.dataset.reset) { if (confirm('Alle Eingaben dieses Tools auf Standard zurücksetzen?')) { state[tool.id] = {}; save(); rebuild(); recalc(tool, root); } return; }
     if (b.dataset.add) { const mods = values(tool).modules; mods.push({ type: 'ablage', qty: 1, ...MODS.ablage.def }); st().modules = mods; }
