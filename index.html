@@ -414,7 +414,8 @@ function samlaLevels(type, v, G) {
   return lv;
 }
 // Böden: gleichmäßig zwischen unterem und oberem Balken (Oberkante Boden)
-function boardLevels(n, G) {
+function boardLevels(n, G, schrank) {
+  if (schrank && n === 1) return [G.kb * 2 + G.postLen - 300];  // Einlegeboden 30 cm unter Oberkante (190 bei 220)
   const out = [];
   for (let i = 1; i <= n; i++) out.push(G.kb + i * G.postLen / (n + 1));
   return out;
@@ -443,8 +444,14 @@ function regalRows(v) {
 }
 
 // Automatische Belegung
-function autoFill(usable, v, G) {
+function autoFill(usable, v, G, key) {
   const fits = items => rowLen(items, G, v.stock) <= usable;
+  if (v.vorlage === 'keller') {
+    const S = s => ({ t: 'samla', s });
+    const plan = key === 'back' ? [S('G'), S('G'), { t: 'schrank', w: 2 * G.sgap + G.kb, n: 1 }, S('M')] : key === 'insel' ? null : [S('G'), S('M'), S('K'), S('K')];
+    if (plan && fits(plan)) return plan;
+    return autoFill(usable, { ...v, vorlage: 'mix' }, G, key);
+  }
   const samlaFill = (base, limit) => {
     const items = base.slice();
     let k = 0;
@@ -458,14 +465,18 @@ function autoFill(usable, v, G) {
   if (v.vorlage === 'boxen') return samlaFill([], usable);
   if (v.vorlage === 'boeden') {
     for (let n = 1; n < 30; n++) {
-      const w = Math.floor(((usable - G.kb) / n - G.kb) / 10) * 10;
-      if (w <= 800) { const it = Array.from({ length: n }, () => ({ t: 'boeden', w: Math.max(350, w), n: 4 })); return fits(it) ? it : it.slice(0, -1); }
+      let w = Math.min(800, Math.floor(((usable - G.kb) / n - G.kb) / 10) * 10);
+      const mk = () => Array.from({ length: n }, () => ({ t: 'boeden', w, n: 4 }));
+      while (w >= 350 && !fits(mk())) w -= 10;
+      if (w < 350) return [];
+      // nur nehmen, wenn mit n Fächern weniger als ein weiteres Fach frei bleibt
+      if (usable - rowLen(mk(), G, v.stock) < 350 + G.kb || n > 25) return mk();
     }
     return [];
   }
   // Mix: ein Bodenfach, Rest SAMLA, übrige Länge geht in das Bodenfach (max. 100 cm)
   const s = samlaFill([], usable - 600 - G.kb);
-  if (!s.length) return autoFill(usable, { ...v, vorlage: 'boeden' }, G);
+  if (!s.length) return autoFill(usable, { ...v, vorlage: 'boeden' }, G, key);
   const items = [{ t: 'boeden', w: 600, n: 4 }, ...s];
   if (!fits(items)) return s;
   // Bodenfach so weit verbreitern, wie es passt (max. 80 cm, sonst biegt OSB durch)
@@ -478,7 +489,7 @@ function resolveRows(v, st) {
   R.rows.forEach(r => {
     const s = saved[r.key];
     r.auto = !s || s.auto !== false;
-    r.items = r.auto ? autoFill(r.usable, v, R.G) : s.items.map(x => ({ ...x }));
+    r.items = r.auto ? autoFill(r.usable, v, R.G, r.key) : s.items.map(x => ({ ...x }));
     r.len = rowLen(r.items, R.G, v.stock);
   });
   return R;
@@ -494,13 +505,13 @@ const toolRegal = {
     { g: '1 · Form', id: 'insel', label: 'Insel (freistehend)', type: 'select', def: 'none', options: [['none', 'keine'], ['single', 'einseitig'], ['dbl', 'doppelseitig (Rücken an Rücken)']] },
     { g: '2 · Raum & Maße', id: 'Wb', label: 'Raumbreite (Rückwand)', def: 3800, unit: 'mm' },
     { g: '2 · Raum & Maße', id: 'D', label: 'Raumtiefe (Seitenwände)', def: 3300, unit: 'mm' },
-    { g: '2 · Raum & Maße', id: 'frontFree', label: 'Vorne an den Seiten freihalten', def: 0, unit: 'mm', help: 'z. B. Tür, Laufweg', show: isForm('L', 'U') },
+    { g: '2 · Raum & Maße', id: 'frontFree', label: 'Vorne an den Seiten freihalten', def: 380, unit: 'mm', help: 'z. B. Tür, Laufweg', show: isForm('L', 'U') },
     { g: '2 · Raum & Maße', id: 'H', label: 'Regalhöhe', def: 2200, unit: 'mm', help: 'Raumhöhe minus ca. 10 cm zum Aufrichten' },
     { g: '2 · Raum & Maße', id: 'T', label: 'Regaltiefe', def: 600, unit: 'mm' },
     { g: '2 · Raum & Maße', id: 'gang', label: 'Mindest-Gangbreite', def: 650, unit: 'mm' },
     { g: '2 · Raum & Maße', id: 'inselL', label: 'Insel-Länge', def: 0, unit: 'mm', help: '0 = automatisch', show: v => v.insel !== 'none' },
     { g: '2 · Raum & Maße', id: 'inselH', label: 'Insel-Höhe', def: 0, unit: 'mm', help: '0 = automatisch (kippsicher)', show: v => v.insel !== 'none' },
-    { g: '3 · Vorlage', id: 'vorlage', label: 'Fächer automatisch füllen mit', type: 'select', def: 'mix', options: [['boxen', 'nur SAMLA-Boxen'], ['boeden', 'nur Böden'], ['mix', 'Mix: Böden + Boxen']] },
+    { g: '3 · Vorlage', id: 'vorlage', label: 'Fächer automatisch füllen mit', type: 'select', def: 'keller', options: [['keller', 'Kellerplan: G G Schrank M / G M K K'], ['boxen', 'nur SAMLA-Boxen'], ['boeden', 'nur Böden'], ['mix', 'Mix: Böden + Boxen']] },
     { g: 'Boxen (selbst messen!)', id: 'r65', label: 'Randmaß r 65 l', def: 411, unit: 'mm', help: 'Boxboden bis Unterkante Rand' },
     { g: 'Boxen (selbst messen!)', id: 'r28', label: 'Randmaß r 45/22 l', def: 271, unit: 'mm' },
     { g: 'Boxen (selbst messen!)', id: 'clear', label: 'Lichte Weite Schienen', def: 365, unit: 'mm' },
@@ -508,15 +519,16 @@ const toolRegal = {
     { g: 'Holz', id: 'kt', label: 'Kantholz Tiefe', def: 78, unit: 'mm' },
     { g: 'Holz', id: 'lh', label: 'Dachlatte Höhe', def: 50, unit: 'mm' },
     { g: 'Holz', id: 'lt', label: 'Dachlatte Stärke', def: 30, unit: 'mm' },
-    { g: 'Holz', id: 'osb', label: 'OSB Böden', def: 18, unit: 'mm' },
-    { g: 'Holz', id: 'osb2', label: 'OSB Schrankwände/Türen', def: 12, unit: 'mm' },
+    { g: 'Holz', id: 'osb', label: 'OSB Böden', def: 12, unit: 'mm', help: 'breite Fächer bekommen Querlatten vorne/hinten' },
+    { g: 'Holz', id: 'osb2', label: 'OSB Schrankwände', def: 12, unit: 'mm' },
+    { g: 'Holz', id: 'doors', label: 'Schranktüren', type: 'select', def: 'alt', options: [['alt', 'alte Türen wiederverwenden'], ['neu', 'neu aus OSB']] },
     { g: 'Holz', id: 'stock', label: 'Lagerlänge Holz', def: 2500, unit: 'mm' },
     { g: 'Holz', id: 'kerf', label: 'Schnittbreite Säge', def: 3, unit: 'mm' },
     { g: 'Abstände', id: 'wallGap', label: 'Wandabstand', def: 20, unit: 'mm' },
     { g: 'Abstände', id: 'head', label: 'Mind. Luft über oberster Schiene', def: 60, unit: 'mm' },
-    { g: 'Preise (ca.)', id: 'pK', label: 'Kantholz 2,5 m', def: 10.5, unit: '€' },
-    { g: 'Preise (ca.)', id: 'pL', label: 'Dachlatte 2,5 m', def: 2.1, unit: '€' },
-    { g: 'Preise (ca.)', id: 'pO', label: 'OSB-Platte 250 × 125', def: 28, unit: '€' },
+    { g: 'Preise (ca.)', id: 'pK', label: 'Kantholz 2,5 m', def: 9.98, unit: '€' },
+    { g: 'Preise (ca.)', id: 'pL', label: 'Dachlatte 2,5 m', def: 2.73, unit: '€' },
+    { g: 'Preise (ca.)', id: 'pO', label: 'OSB-Platte 250 × 125', def: 22.5, unit: '€' },
   ],
 
   // ---- Fächer-Editor (Schritt 4) ----
@@ -549,7 +561,7 @@ const toolRegal = {
     if (!row) return;
     let items = row.items;
     const i = +el.dataset.i;
-    const mk = t => t.startsWith('S:') ? { t: 'samla', s: t.slice(2) } : { t, w: t === 'luecke' ? 600 : t === 'frei' ? 800 : t === 'schrank' ? 900 : 800, n: t === 'schrank' ? 2 : 4 };
+    const mk = t => t.startsWith('S:') ? { t: 'samla', s: t.slice(2) } : { t, w: t === 'luecke' ? 600 : t === 'frei' ? 800 : t === 'schrank' ? 908 : 800, n: t === 'schrank' ? 1 : 4 };
     if (kind === 'click') {
       const a = el.dataset.xbtn;
       if (a === 'auto') { st.rows = { ...(st.rows || {}), [key]: { auto: true } }; return; }
@@ -602,6 +614,7 @@ const toolRegal = {
     // Mengen
     const kant = [], latt = [], osbParts = [];
     const boxes = { '65': 0, '45': 0, '22': 0 };
+    const querFach = new Set(); let stangen = 0;
     let n6 = 0, nRailScrews = 0, n4x35 = 0, lochband = 0, nPads = 0, nWall = 0, nFloor = 0, nBoardScrews = 0, hinges = 0, handles = 0, nFach = 0;
     const cnt = { samla: 0, boeden: 0, frei: 0, schrank: 0 };
     const addN = (arr, n, len, label) => { for (let i = 0; i < n; i++) arr.push({ len, label }); };
@@ -617,18 +630,21 @@ const toolRegal = {
         if (f.t === 'samla') samlaLevels(f.s, v, g).forEach(l => { addN(latt, 2 * x, v.T, 'C'); nRailScrews += 8 * x; boxes[l.box] += (l.box === '22' ? 2 : 1) * x; });
         if (f.t === 'boeden' || f.t === 'schrank') {
           addN(latt, 2 * f.n * x, v.T, 'C'); nRailScrews += 8 * f.n * x;
-          osbAdd('Boden', f.n * x, w, v.T, v.osb); nBoardScrews += 4 * f.n * x;
-          if (w > 800) msgs.push(['warn', `Fach ${cmS(w)} cm breit: OSB ${v.osb} mm biegt sich bei Last durch. Mittig eine Latte unterlegen oder Fach schmaler machen (≤ 80 cm).`]);
+          const bw = f.t === 'schrank' ? w - 2 * v.osb2 : w;
+          osbAdd(f.t === 'schrank' ? 'Schrank Einlegeboden' : 'Boden', f.n * x, bw, v.T - 10, v.osb); nBoardScrews += 4 * f.n * x;
+          if (w > v.osb * 40) { addN(latt, 2 * f.n * x, w, 'Q'); nRailScrews += 4 * f.n * x; querFach.add(cmS(w)); }
+          if (w > v.osb * 80) msgs.push(['warn', `Fach ${cmS(w)} cm breit: auch mit Querlatten zu weit für OSB ${v.osb} mm – dickere Platte oder Fach schmaler.`]);
         }
         if (f.t === 'schrank') {
-          osbAdd('Schrank Rückwand', x, g.postLen, w + kb, v.osb2);
-          osbAdd('Schrank Seite', 2 * x, g.postLen, v.T, v.osb2);
-          osbAdd('Schranktür', 2 * x, g.postLen - 6, (w + kb) / 2 - 3, v.osb2);
-          hinges += 6 * x; handles += 2 * x;
+          osbAdd('Schrank Rückwand (hinten auf den Rahmen)', x, m.H, w + 2 * kb, v.osb2);
+          osbAdd('Schrank Seite (innen an die Pfosten)', 2 * x, g.postLen, v.T, v.osb2);
+          if (v.doors === 'neu') { osbAdd('Schranktür (aufliegend)', 2 * x, m.H - 10, (w + 2 * kb) / 2 - 2, v.osb2); hinges += 6 * x; handles += 2 * x; }
+          stangen += x;
         }
       });
     });
     const kBins = packLengths(kant, v.stock, v.kerf), lBins = packLengths(latt, v.stock, v.kerf);
+    if (querFach.size) msgs.push(['info', `OSB ${v.osb} mm: Fächer ${[...querFach].join(', ')} cm breit bekommen je Boden 2 Querlatten (vorne + hinten zwischen die Pfosten), damit der Boden nicht durchhängt.`]);
     if (kBins.some(b => b.over)) msgs.push(['err', `Ein Teil ist länger als ${cmS(v.stock)} cm.`]);
     const osbArea = sum(osbParts.map(p => p.qty * p.l * p.b)) / 1e6;
     const osbSheets = osbArea ? Math.ceil(osbArea * 1.2 / 3.125) : 0;
@@ -716,7 +732,7 @@ const toolRegal = {
             h += S.rect(x0, y, v.lt, v.lh, 'fill="#111"') + S.rect(x0 + w - v.lt, y, v.lt, v.lh, 'fill="#111"');
             h += S.text(x0 + w / 2, y + rr / 2 + f2 * 0.3, BOXLBL[l.box], `font-size="${f2 * 0.6}" text-anchor="middle" class="lbl"`);
           });
-          if (f.t === 'boeden' || f.t === 'schrank') boardLevels(f.n, gg).forEach(top => {
+          if (f.t === 'boeden' || f.t === 'schrank') boardLevels(f.n, gg, f.t === 'schrank').forEach(top => {
             const y = H - top;
             h += S.rect(x0, y, w, v.osb, 'class="wood"') + S.rect(x0, y + v.osb, v.lt, v.lh, 'fill="#111"') + S.rect(x0 + w - v.lt, y + v.osb, v.lt, v.lh, 'fill="#111"');
           });
@@ -750,7 +766,7 @@ const toolRegal = {
           pl = lv.map(l => l.plate).join('') + ' · ' + lv.map(l => cmS(l.top)).join(' · ');
           inh = Object.entries(c).filter(e => e[1]).map(e => `${e[1]}× ${e[0]} l`).join(' + ');
         } else if (f.t === 'boeden' || f.t === 'schrank') {
-          const lv = boardLevels(f.n, gg);
+          const lv = boardLevels(f.n, gg, f.t === 'schrank');
           pl = lv.map(t => cmS(t)).join(' · ');
           inh = `${f.n} Böden${f.t === 'schrank' ? ', 2 Türen' : ''}`;
         } else inh = f.t === 'frei' ? 'Stapelfläche (Kartons)' : 'kein Regal';
@@ -768,7 +784,8 @@ const toolRegal = {
     plan.parts = [
       ...Object.entries(bal).map(([L, q]) => ({ name: 'A Balken', qty: q, l: +L, b: v.kt, t: kb, mat: 'Kantholz sägerau', note: '2 je Rahmen' })),
       ...Object.entries(posts).map(([L, q]) => ({ name: 'B Pfosten', qty: q, l: +L, b: v.kt, t: kb, mat: 'Kantholz sägerau' })),
-      { name: 'C Latte (Schiene/Auflage)', qty: latt.length, l: v.T, b: v.lh, t: v.lt, mat: 'Dachlatte sägerau', note: 'vorne + hinten an die Pfosten' },
+      { name: 'C Latte (Schiene/Auflage)', qty: latt.filter(i => i.label === 'C').length, l: v.T, b: v.lh, t: v.lt, mat: 'Dachlatte sägerau', note: 'vorne + hinten an die Pfosten' },
+      ...[...new Set(latt.filter(i => i.label === 'Q').map(i => i.len))].map(L => ({ name: 'Q Querlatte unter Boden', qty: latt.filter(i => i.label === 'Q' && i.len === L).length, l: L, b: v.lh, t: v.lt, mat: 'Dachlatte sägerau', note: 'vorne + hinten zwischen die Pfosten' })),
       ...osbParts,
     ];
     const sm = (v.stock / 1000).toFixed(1).replace('.', ',');
@@ -777,7 +794,7 @@ const toolRegal = {
       `<p><b>Dachlatten ${sm} m → Latten (C):</b> ${lBins.length} Stück.</p>` +
       stripPlanSvg(lBins, v.stock, v.lh, 99, 'Zuschnitt Dachlatten (Maße in mm).', { group: true, name: `Dachlatte ${sm} m` }) +
       (osbSheets ? `<p><b>OSB:</b> ca. ${osbArea.toFixed(2).replace('.', ',')} m² → ${osbSheets} Platte(n) 250 × 125 (inkl. 20 % Verschnitt). Im Baumarkt nach Zuschnittliste schneiden lassen.</p>` : '');
-    const boardSpacers = [...new Set(R.rows.flatMap(r => r.items.filter(f => f.t === 'boeden' || f.t === 'schrank').map(f => Math.round(geoFor(r.key).postLen / (f.n + 1) - v.lh))))];
+    const boardSpacers = [...new Set(R.rows.flatMap(r => r.items.filter(f => f.t === 'boeden').map(f => Math.round(geoFor(r.key).postLen / (f.n + 1) - v.lh))))];
     plan.jigs = [
       ['Maßlatten mit Endanschlag', [v.T, ...Object.keys(bal).map(Number), ...Object.keys(posts).map(Number)].map(cmS).join(' · ') + ' cm', 'je eine pro Länge'],
       ...(nBox ? [['Abstandsplatten A / B / C / D', ['A', 'B', 'C', 'D'].map(k => cmS(G.plates[k])).join(' / ') + ' cm', 'SAMLA-Schienen: A/C erste Schiene vom Balken, B/D jede weitere (A/B 45 + 22 l, C/D 65 l)']] : []),
@@ -800,6 +817,8 @@ const toolRegal = {
       ...(nFloor ? [['Winkelverbinder + Bodenanker', `${nFloor} Stk`, 'Insel am Boden verschrauben']] : []),
       ['Unterlegplatte Kunststoff 3–5 mm', `${nPads} Stk`, 'unter die Bodenbalken'],
       ...(hinges ? [['Möbelscharnier / Aufschraubband', `${hinges} Stk`, '3 je Tür'], ['Griff + Magnetschnäpper', `${handles} Stk`, '1 je Tür']] : []),
+      ...(stangen ? [['Kleiderstange Ovalrohr + 2 Halter', `${stangen} Satz`, 'im Schrank auf ca. 180 cm'], ['Holzschraube 4 × 40', '1 Pck.', 'OSB an die Pfosten']] : []),
+      ...(stangen && v.doors === 'alt' ? [['alte Schranktüren + Scharniere', `${stangen * 2} Türen`, 'Montageplatten durch die OSB-Seite in den Pfosten']] : []),
       ...['65', '45', '22'].filter(k => boxes[k]).map(k => [`IKEA SAMLA mit Deckel ${k} l`, `${boxes[k]} Stk`, '']),
     ];
     plan.steps = [
@@ -809,8 +828,8 @@ const toolRegal = {
       `<b>Rechtwinklig + Lochband:</b> Diagonalen gleich lang? Dann eine Diagonale Lochband auf die Rückseite.`,
       `<b>Aufstellen:</b> Unterlegplatten unter die Balken. Hinteren Rahmen mit ${cmS(v.wallGap)} cm Wandabstand, vorderen ${cmS(v.T)} cm davor.${R.insel ? ` Insel: ${v.insel === 'dbl' ? 'zwei Regale Rücken an Rücken stellen und verschrauben, ' : ''}mit Winkeln am Boden verschrauben.` : ''}`,
       `<b>Latten von unten nach oben:</b> Abstandsplatte auf Balken bzw. untere Latte stellen, Latte auflegen, mit Schraubschablone vorbohren, 2 × 4,5 × 60 je Ende. Linke Latte Bohrbild A, rechte B.`,
-      ...(cnt.boeden || cnt.schrank ? [`<b>Böden:</b> OSB-Böden auf die Latten legen, je 4 Schrauben 4 × 30. Fächer über 80 cm mittig zusätzlich unterstützen.`] : []),
-      ...(cnt.schrank ? [`<b>Schrank:</b> Rück- und Seitenwände aus OSB ${v.osb2} mm aufschrauben, Türen mit 3 Bändern an die Pfosten, Griff und Magnetschnäpper.`] : []),
+      ...(cnt.boeden ? [`<b>Böden:</b> OSB-Böden auf die Latten legen, je 4 Schrauben 4 × 30.${querFach.size ? ' In breiten Fächern vorher die Querlatten vorne und hinten zwischen die Pfosten schrauben (Oberkante = Oberkante Seitenlatte).' : ''}`] : []),
+      ...(cnt.schrank ? [`<b>Schrank</b> (ohne Mittelpfosten – beim Rahmenbau 2 Abstandshölzer + ${cmS(kb)} cm Klotz statt Pfosten): OSB-Rückwand hinten auf den Rahmen (alle ca. 20 cm), OSB-Seiten innen an die Pfosten, 2 Latten auf ca. ${cmS(v.H - 300)} cm und Einlegeboden auflegen, Kleiderstange auf ca. ${cmS(v.H - 400)} cm, Türen ${v.doors === 'alt' ? '(die alten) ' : ''}einhängen und einstellen. Regal auf Unterlegplatten, damit die Türen nicht schleifen.`] : []),
       `<b>Sichern:</b> Wandmodule oben mit 2 Winkeln an die Wand. Benachbarte Module verschrauben${v.form !== 'I' ? ', Ecken mit Kantholz-Rest über der Stoßkante' : ''}.`,
       ...(nBox ? [`<b>Boxen einhängen:</b> Prüfstab ${cmS(v.clear)} cm muss leicht durchgehen. Schienen-Oberkanten anschleifen. Schweres nach unten, max. ca. 15 kg je Box.`] : []),
     ];
