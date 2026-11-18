@@ -347,20 +347,25 @@ function renderPlan(plan) {
 }
 
 /* ---------- 3D-Ansicht (isometrisch, als SVG – druckt auch ins PDF) ---------- */
-// Quader: { x0,x1,y0,y1,z0,z1, c: Farbe }  (x entlang Rückwand, y in den Raum, z nach oben)
+// Quader: { x0,x1,y0,y1,z0,z1, c: Art }  (x entlang Rückwand, y in den Raum, z nach oben)
 const ISO_VIEWS = { vr: 0, vl: -90, hl: 180, hr: 90 };
+const ISO_PAL = {
+  color: { wood: '#c99a5c', rail: '#4a4a4a', b65: '#b9cde6', b45: '#cfdcec', b22: '#dde6f1', osb: '#e7cf9f', sch: '#f3f1ec', door: '#fbfbf8', hi: '#f2c94c', wall: '#e2ddd2', metal: '#8a8a8a', floor: '#ece6da', edge: null },
+  mono: { wood: '#ffffff', rail: '#1c1c1c', b65: '#3c3c3c', b45: '#4c4c4c', b22: '#5c5c5c', osb: '#f3f3f3', sch: '#f7f7f7', door: '#ffffff', hi: '#f2c94c', wall: '#eeeeee', metal: '#777777', floor: null, edge: '#111111' },
+};
 function shade(hex, f) {
   const n = parseInt(hex.slice(1), 16);
   const ch = k => clamp(Math.round(((n >> k) & 255) * f), 0, 255);
   return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
 }
-function iso3dSvg(cubes, room, view, caption) {
+// opts: pal ('color'|'mono'), lines [[x,y,z,x,y,z,farbe,breite]], noFloor, raw (nur <svg>), sw (Linienbreite)
+function iso3dSvg(cubes, room, view, caption, opts = {}) {
+  const pal = ISO_PAL[opts.pal || 'color'];
   const ang = (ISO_VIEWS[view] || 0) * Math.PI / 180, co = Math.round(Math.cos(ang)), si = Math.round(Math.sin(ang));
   const cx = room.w / 2, cy = room.d / 2;
   const rot = (x, y) => [co * (x - cx) - si * (y - cy), si * (x - cx) + co * (y - cy)];
   const C30 = Math.cos(Math.PI / 6), S30 = 0.5;
   const P = (x, y, z) => [(x - y) * C30, (x + y) * S30 - z];
-  // lange Teile in Stücke teilen, damit die Zeichenreihenfolge stimmt
   const MAXL = 160, parts = [];
   cubes.forEach(c => {
     const [ax, ay] = rot(c.x0, c.y0), [bx, by] = rot(c.x1, c.y1);
@@ -369,22 +374,101 @@ function iso3dSvg(cubes, room, view, caption) {
     for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) parts.push({
       x0: X0 + (X1 - X0) * i / nx, x1: X0 + (X1 - X0) * (i + 1) / nx,
       y0: Y0 + (Y1 - Y0) * j / ny, y1: Y0 + (Y1 - Y0) * (j + 1) / ny, z0: c.z0, z1: c.z1, c: c.c,
+      bx0: i === 0, bx1: i === nx - 1, by0: j === 0, by1: j === ny - 1,
     });
   });
   parts.sort((a, b) => (a.x0 + a.x1 + a.y0 + a.y1) - (b.x0 + b.x1 + b.y0 + b.y1) || a.z0 - b.z0);
   let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
-  const pts = arr => arr.map(([x, y, z]) => { const [px, py] = P(x, y, z); minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py); return `${px.toFixed(1)},${py.toFixed(1)}`; }).join(' ');
-  // Boden
-  const fl = [[0, 0], [room.w, 0], [room.w, room.d], [0, room.d]].map(([x, y]) => rot(x, y));
-  let g = `<polygon points="${pts(fl.map(([x, y]) => [x, y, 0]))}" fill="#ece6da" stroke="#b9b0a0"/>`;
+  const pp = (x, y, z) => { const [px, py] = P(x, y, z); minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py); return [px, py]; };
+  const pts = arr => arr.map(a => pp(...a).map(n => n.toFixed(1)).join(',')).join(' ');
+  const sw = opts.sw || Math.max(room.w, room.d, 600) / 700;
+  const E = pal.edge;
+  const seg = (a, b) => { const [x1, y1] = pp(...a), [x2, y2] = pp(...b); return `M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}`; };
+  let g = '';
+  if (!opts.noFloor && pal.floor) {
+    const fl = [[0, 0], [room.w, 0], [room.w, room.d], [0, room.d]].map(([x, y]) => rot(x, y));
+    g += `<polygon points="${pts(fl.map(([x, y]) => [x, y, 0]))}" fill="${pal.floor}" stroke="#b9b0a0"/>`;
+  }
   parts.forEach(p => {
-    const { x0, x1, y0, y1, z0, z1 } = p;
-    g += `<polygon points="${pts([[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]])}" fill="${shade(p.c, 0.78)}"/>`;
-    g += `<polygon points="${pts([[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]])}" fill="${shade(p.c, 0.9)}"/>`;
-    g += `<polygon points="${pts([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]])}" fill="${shade(p.c, 1.05)}"/>`;
+    const { x0, x1, y0, y1, z0, z1 } = p, col = pal[p.c] || p.c;
+    // rechte Seite (x = x1), vordere Seite (y = y1), Deckfläche (z = z1)
+    const faces = [
+      [[[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]], 0.86, [[[x1, y0, z0], [x1, y1, z0]], [[x1, y0, z1], [x1, y1, z1]], ...(p.by0 ? [[[x1, y0, z0], [x1, y0, z1]]] : []), ...(p.by1 ? [[[x1, y1, z0], [x1, y1, z1]]] : [])]],
+      [[[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], 0.94, [[[x0, y1, z0], [x1, y1, z0]], [[x0, y1, z1], [x1, y1, z1]], ...(p.bx0 ? [[[x0, y1, z0], [x0, y1, z1]]] : []), ...(p.bx1 ? [[[x1, y1, z0], [x1, y1, z1]]] : [])]],
+      [[[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], 1.04, [...(p.by0 ? [[[x0, y0, z1], [x1, y0, z1]]] : []), ...(p.by1 ? [[[x0, y1, z1], [x1, y1, z1]]] : []), ...(p.bx0 ? [[[x0, y0, z1], [x0, y1, z1]]] : []), ...(p.bx1 ? [[[x1, y0, z1], [x1, y1, z1]]] : [])]],
+    ];
+    faces.forEach(([poly, f, edges]) => {
+      g += `<polygon points="${pts(poly)}" fill="${shade(col, f)}"${E ? '' : ''}/>`;
+      if (E && edges.length) g += `<path d="${edges.map(e => seg(e[0], e[1])).join('')}" stroke="${E}" stroke-width="${sw}" fill="none" stroke-linecap="round"/>`;
+    });
   });
-  const pad = 40;
-  return `<figure class="drw iso"><svg viewBox="${(minX - pad).toFixed(0)} ${(minY - pad).toFixed(0)} ${(maxX - minX + 2 * pad).toFixed(0)} ${(maxY - minY + 2 * pad).toFixed(0)}" xmlns="http://www.w3.org/2000/svg">${g}</svg><figcaption>${esc(caption)}</figcaption></figure>`;
+  (opts.lines || []).forEach(l => {
+    const [a, b] = [rot(l[0], l[1]), rot(l[3], l[4])];
+    g += `<path d="${seg([a[0], a[1], l[2]], [b[0], b[1], l[5]])}" stroke="${l[6] || '#c00'}" stroke-width="${(l[7] || 2) * sw}" fill="none" stroke-linecap="round"/>`;
+  });
+  const pad = Math.max(maxX - minX, maxY - minY) * 0.03;
+  const svg = `<svg viewBox="${(minX - pad).toFixed(0)} ${(minY - pad).toFixed(0)} ${(maxX - minX + 2 * pad).toFixed(0)} ${(maxY - minY + 2 * pad).toFixed(0)}" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+  if (opts.raw) return svg;
+  return `<figure class="drw iso">${svg}<figcaption>${esc(caption)}</figcaption></figure>`;
+}
+
+// Quader eines Moduls (lokale Koordinaten: a entlang, c Tiefe 0 = Wandseite, z Höhe)
+// o: frames [[c0,c1],…], rails (false | Anzahl Ebenen im 1. Fach), boxes, plate (Abstandsplatte zeigen), spacers (Abstandshölzer)
+function moduleCubes(p, v, gg, H, add, o = {}) {
+  const T = v.T, kt = v.kt, k = gg.kb;
+  const frames = o.frames || [[0, kt], [T - kt, T]];
+  frames.forEach(([c0, c1]) => { add(0, p.len, c0, c1, 0, k, 'wood'); add(0, p.len, c0, c1, H - k, H, 'wood'); });
+  let q = 0;
+  const post = qq => frames.forEach(([c0, c1]) => add(qq, qq + k, c0, c1, k, H - k, 'wood'));
+  post(q);
+  p.items.forEach(({ f, w }, fi) => {
+    const x0 = q + k;
+    const rails = top => { add(x0, x0 + v.lt, 0, T, top - v.lh, top, 'rail'); add(x0 + w - v.lt, x0 + w, 0, T, top - v.lh, top, 'rail'); };
+    if (o.spacers) frames.forEach(([c0, c1]) => { add(x0, x0 + w, c0, c1, k, k + 45, 'hi'); add(x0, x0 + w, c0, c1, H - k - 45, H - k, 'hi'); });
+    const limit = o.rails === false ? 0 : typeof o.rails === 'number' ? (fi === 0 ? o.rails : 0) : 99;
+    if (f.t === 'samla') samlaLevels(f.s, v, gg).forEach((l, li) => {
+      if (li >= limit) return;
+      rails(l.top);
+      if (o.plate && fi === 0 && li === limit - 1) add(x0 + v.lt, x0 + v.lt + 15, -15, T + 15, l.top, l.top + gg.plates.B, 'hi');
+      if (!o.boxes) return;
+      const rr = l.box === '65' ? v.r65 : v.r28, bx0 = x0 + w / 2 - 195, bx1 = x0 + w / 2 + 195;
+      if (l.box === '22') { add(bx0, bx1, T - 290, T - 10, l.top - rr, l.top + 20, 'b22'); add(bx0, bx1, T - 580, T - 300, l.top - rr, l.top + 20, 'b22'); }
+      else add(bx0, bx1, T - 580, T - 10, l.top - rr, l.top + 20, l.box === '65' ? 'b65' : 'b45');
+    });
+    if ((f.t === 'boeden' || f.t === 'schrank') && limit) boardLevels(f.n, gg, f.t === 'schrank').forEach((top, li) => { if (li >= limit) return; rails(top); add(x0, x0 + w, 5, T - 5, top, top + v.osb, 'osb'); });
+    if (f.t === 'schrank' && limit) {
+      add(x0 - k, x0 + w + k, -v.osb2, 0, 0, H, 'sch');
+      add(x0, x0 + v.osb2, kt, T - kt, k, H - k, 'sch'); add(x0 + w - v.osb2, x0 + w, kt, T - kt, k, H - k, 'sch');
+      if (o.boxes) add(x0 - k + 2, x0 + w + k - 2, T, T + 19, 10, H - 10, 'door');
+    }
+    q = x0 + w; post(q);
+  });
+}
+// Ganze Planung als Quader
+function layoutCubes(R, v, G, geoFor, inselH, o = {}) {
+  const cubes = [];
+  const place = (r, side) => {
+    const I = R.insel;
+    if (r.key === 'back') { const ox = v.form === 'I' ? 15 : G.depth; return (a0, a1, c0, c1) => [ox + a0, ox + a1, v.wallGap + c0, v.wallGap + c1]; }
+    if (r.key === 'left') return (a0, a1, c0, c1) => [v.wallGap + c0, v.wallGap + c1, G.depth + a0, G.depth + a1];
+    if (r.key === 'right') return (a0, a1, c0, c1) => [v.Wb - v.wallGap - c1, v.Wb - v.wallGap - c0, G.depth + a0, G.depth + a1];
+    const xl = I.cx - I.iDepth / 2, xr = I.cx + I.iDepth / 2;
+    return side === 1 ? (a0, a1, c0, c1) => [xr - c1, xr - c0, I.y0 + a0, I.y0 + a1] : (a0, a1, c0, c1) => [xl + c0, xl + c1, I.y0 + a0, I.y0 + a1];
+  };
+  R.rows.forEach(r => {
+    const gg = geoFor(r.key), H = r.key === 'insel' ? inselH : v.H;
+    for (let side = 0; side < (r.mult || 1); side++) {
+      const m = place(r, side);
+      let pos = 0;
+      (r.parts || []).forEach(p => {
+        if (p.gap) { pos += p.w; return; }
+        const off = pos;
+        moduleCubes(p, v, gg, H, (a0, a1, c0, c1, z0, z1, c) => { const [x0, x1, y0, y1] = m(off + a0, off + a1, c0, c1); cubes.push({ x0, x1, y0, y1, z0, z1, c }); }, o);
+        pos += p.len;
+      });
+    }
+  });
+  return cubes;
 }
 
 /* =====================================================================
@@ -544,6 +628,7 @@ const toolRegal = {
   unit: 'cm',
   extraAfter: '3 · Vorlage',
   fields: [
+    { g: '1 · Form', id: 'pname', label: 'Projektname (für den Bauplan)', type: 'text', def: 'das kellerregal' },
     { g: '1 · Form', id: 'form', label: 'Grundform', type: 'select', def: 'U', options: [['I', 'I – eine Wand'], ['L', 'L – Rückwand + linke Wand'], ['U', 'U – drei Wände']] },
     { g: '1 · Form', id: 'insel', label: 'Insel (freistehend)', type: 'select', def: 'none', options: [['none', 'keine'], ['single', 'einseitig'], ['dbl', 'doppelseitig (Rücken an Rücken)']] },
     { g: '2 · Raum & Maße', id: 'Wb', label: 'Raumbreite (Rückwand)', def: 3800, unit: 'mm' },
@@ -799,54 +884,9 @@ const toolRegal = {
       fronts.push(drawing(-f2 * 2.2, -f2 * 2.2, total + f2 * 3.4, H + f2 * 3.8, h, `Vorderansicht ${ROWDEF[r.key]}${r.mult === 2 ? ' (beide Seiten)' : ''} – Maße über den Modulen = Balkenlänge`));
     });
 
-    // ---- 3D-Quader ----
-    let iso = '';
-    if (v.view3d !== 'off') {
-      const cubes = [], COL = { wood: '#c99a5c', rail: '#4a4a4a', b65: '#b9cde6', b45: '#cfdcec', b22: '#dde6f1', osb: '#e7cf9f', sch: '#f3f1ec', door: '#fbfbf8' };
-      const place = (r, side) => {
-        const I = R.insel;
-        if (r.key === 'back') { const ox = v.form === 'I' ? 15 : G.depth; return (a0, a1, c0, c1) => [ox + a0, ox + a1, v.wallGap + c0, v.wallGap + c1]; }
-        if (r.key === 'left') return (a0, a1, c0, c1) => [v.wallGap + c0, v.wallGap + c1, G.depth + a0, G.depth + a1];
-        if (r.key === 'right') return (a0, a1, c0, c1) => [v.Wb - v.wallGap - c1, v.Wb - v.wallGap - c0, G.depth + a0, G.depth + a1];
-        const xl = I.cx - I.iDepth / 2, xr = I.cx + I.iDepth / 2;
-        return side === 1 ? (a0, a1, c0, c1) => [xr - c1, xr - c0, I.y0 + a0, I.y0 + a1] : (a0, a1, c0, c1) => [xl + c0, xl + c1, I.y0 + a0, I.y0 + a1];
-      };
-      R.rows.forEach(r => {
-        const gg = geoFor(r.key), H = r.key === 'insel' ? inselH : v.H, T = v.T, kt = v.kt, k = gg.kb;
-        for (let side = 0; side < (r.mult || 1); side++) {
-          const m = place(r, side);
-          const add = (a0, a1, c0, c1, z0, z1, c) => { const [x0, x1, y0, y1] = m(a0, a1, c0, c1); cubes.push({ x0, x1, y0, y1, z0, z1, c }); };
-          let pos = 0;
-          r.parts.forEach(p => {
-            if (p.gap) { pos += p.w; return; }
-            [[0, kt], [T - kt, T]].forEach(([c0, c1]) => { add(pos, pos + p.len, c0, c1, 0, k, COL.wood); add(pos, pos + p.len, c0, c1, H - k, H, COL.wood); });
-            let q = pos;
-            const post = qq => [[0, kt], [T - kt, T]].forEach(([c0, c1]) => add(qq, qq + k, c0, c1, k, H - k, COL.wood));
-            post(q);
-            p.items.forEach(({ f, w }) => {
-              const x0 = q + k;
-              const rails = top => { add(x0, x0 + v.lt, 0, T, top - v.lh, top, COL.rail); add(x0 + w - v.lt, x0 + w, 0, T, top - v.lh, top, COL.rail); };
-              if (f.t === 'samla') samlaLevels(f.s, v, gg).forEach(l => {
-                rails(l.top);
-                const rr = l.box === '65' ? v.r65 : v.r28, bx0 = x0 + w / 2 - 195, bx1 = x0 + w / 2 + 195;
-                if (l.box === '22') { add(bx0, bx1, T - 290, T - 10, l.top - rr, l.top + 20, COL.b22); add(bx0, bx1, T - 580, T - 300, l.top - rr, l.top + 20, COL.b22); }
-                else add(bx0, bx1, T - 580, T - 10, l.top - rr, l.top + 20, l.box === '65' ? COL.b65 : COL.b45);
-              });
-              if (f.t === 'boeden' || f.t === 'schrank') boardLevels(f.n, gg, f.t === 'schrank').forEach(top => { rails(top); add(x0, x0 + w, 5, T - 5, top, top + v.osb, COL.osb); });
-              if (f.t === 'schrank') {
-                add(x0 - k, x0 + w + k, -v.osb2, 0, 0, H, COL.sch);
-                add(x0, x0 + v.osb2, kt, T - kt, k, H - k, COL.sch); add(x0 + w - v.osb2, x0 + w, kt, T - kt, k, H - k, COL.sch);
-                add(x0 - k + 2, x0 + w + k - 2, T, T + 19, 10, H - 10, COL.door);
-              }
-              q = x0 + w; post(q);
-            });
-            pos += p.len;
-          });
-        }
-      });
-      const VN = { vr: 'von vorne rechts', vl: 'von vorne links', hl: 'von hinten links', hr: 'von hinten rechts' };
-      iso = iso3dSvg(cubes, { w: v.Wb, d: v.D }, v.view3d, `3D-Ansicht ${VN[v.view3d]} (Blickrichtung im Formular unter „5 · 3D-Ansicht“ ändern)`);
-    }
+    // ---- 3D ----
+    const VN = { vr: 'von vorne rechts', vl: 'von vorne links', hl: 'von hinten links', hr: 'von hinten rechts' };
+    const iso = v.view3d === 'off' ? '' : iso3dSvg(layoutCubes(R, v, G, geoFor, inselH, { boxes: true }), { w: v.Wb, d: v.D }, v.view3d, `3D-Ansicht ${VN[v.view3d]} (Blickrichtung im Formular unter „5 · 3D-Ansicht“ ändern)`);
     plan.drawings = [grund, ...(iso ? [iso] : []), ...fronts];
 
     // Tabellen
@@ -930,6 +970,8 @@ const toolRegal = {
     ];
     msgs.push(['info', 'Vor dem Bohren Leitungen prüfen. Im Keller Holz einige Tage akklimatisieren. Entwurf – erstes Fach mit echten Boxen testen.']);
 
+    plan.data = { v, R, G, geoFor, inselH, mods, kBins, lBins, boxes, nBox, nFach, cnt, osbParts, osbSheets, holz, besch, bal, posts, latt,
+      n6, nRailScrews, nBoardScrews, n4x35, lochband, nWall, nFloor, nPads, hinges, handles, stangen, querFach };
     // Schraubschablone
     const sw = 100, sh = v.lh;
     const tpl = (pat, y0) => {
@@ -1316,11 +1358,12 @@ const PDF_LIBS = [
   ['lib/jspdf.umd.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js'],
   ['lib/svg2pdf.umd.min.js', 'https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.4/dist/svg2pdf.umd.min.js'],
   ['lib/jspdf.plugin.autotable.min.js', 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js'],
+  ['lib/inter-fonts.js', null],
 ];
 const loadScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
 let pdfReady = null;
 function loadPdfLibs() {
-  if (!pdfReady) pdfReady = (async () => { for (const [a, b] of PDF_LIBS) { try { await loadScript(a); } catch (e) { await loadScript(b); } } })().catch(e => { pdfReady = null; throw e; });
+  if (!pdfReady) pdfReady = (async () => { for (const [a, b] of PDF_LIBS) { try { await loadScript(a); } catch (e) { if (b) await loadScript(b); } } })().catch(e => { pdfReady = null; throw e; });
   return pdfReady;
 }
 // Standardschrift im PDF kennt nur Westeuropa-Zeichen
@@ -1330,15 +1373,37 @@ const pdfTxt = s => String(s)
   .replace(/[   ]/g, ' ').replace(/−/g, '-').replace(/[^\x00-\xFF€–—…•]/g, '');
 
 // Stile aus dem CSS fest in die SVG schreiben; Linienstärken für den Druck in mm umrechnen
-function prepSvg(svg, targetWmm) {
+// opt.family: Schrift im PDF · opt.mono: Farben → Schwarz-Weiß (helle Flächen, dunkle Linien)
+function prepSvg(svg, targetWmm, opt = {}) {
+  const family = opt.family || 'helvetica';
   const clone = svg.cloneNode(true);
   const vb = svg.viewBox && svg.viewBox.baseVal;
   const upm = vb && vb.width ? vb.width / targetWmm : 1;   // Benutzereinheiten je mm
+  const mono = (val, isStroke) => {
+    const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?/.exec(val || '');
+    if (!m) return val;
+    if (m[4] !== undefined && +m[4] === 0) return 'none';
+    const r = +m[1], g = +m[2], b = +m[3];
+    if (r > 200 && g > 150 && b < 120 && r - b > 100) return val;            // Gelb (Hervorhebung) bleibt
+    const lum = 0.3 * r + 0.59 * g + 0.11 * b;
+    if (isStroke) return lum > 215 ? val : 'rgb(20,20,20)';
+    if (lum < 90) return 'rgb(28,28,28)';
+    const l = Math.round(255 - (255 - lum) * 0.35);
+    return `rgb(${l},${l},${l})`;
+  };
   const src = [svg, ...svg.querySelectorAll('*')], dst = [clone, ...clone.querySelectorAll('*')];
   src.forEach((el, i) => {
     const cs = getComputedStyle(el), d = dst[i];
     if (el.tagName === 'clipPath' || el.closest('defs')) return;
-    ['fill', 'stroke', 'fill-opacity', 'stroke-opacity'].forEach(p => { const val = cs.getPropertyValue(p); if (val && !d.hasAttribute(p)) d.setAttribute(p, val); });
+    ['fill', 'stroke', 'fill-opacity', 'stroke-opacity'].forEach(p => {
+      let val = d.getAttribute(p) || cs.getPropertyValue(p);
+      if (!val) return;
+      if (opt.mono && (p === 'fill' || p === 'stroke') && val !== 'none') {
+        if (val[0] === '#') { const n = parseInt(val.slice(1).padEnd(6, val.slice(1)), 16); val = `rgb(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255})`; }
+        val = el.tagName === 'text' && p === 'fill' ? 'rgb(20,20,20)' : mono(val, p === 'stroke');
+      }
+      d.setAttribute(p, val);
+    });
     const nonScaling = cs.getPropertyValue('vector-effect') === 'non-scaling-stroke';
     const sw = parseFloat(cs.getPropertyValue('stroke-width')) || 0;
     const da = cs.getPropertyValue('stroke-dasharray');
@@ -1348,16 +1413,395 @@ function prepSvg(svg, targetWmm) {
     } else if (da && da !== 'none' && !d.hasAttribute('stroke-dasharray')) d.setAttribute('stroke-dasharray', da.replace(/px/g, ''));
     d.removeAttribute('class'); d.removeAttribute('vector-effect');
     if (d.tagName === 'text' || d.tagName === 'g') {
-      d.setAttribute('font-family', 'helvetica');
+      d.setAttribute('font-family', family);
       const fw = parseInt(cs.getPropertyValue('font-weight')) || 400;
       d.setAttribute('font-weight', fw >= 600 ? 'bold' : 'normal');
-      if (d.tagName === 'text') d.textContent = pdfTxt(d.textContent);
+      if (d.tagName === 'text') d.textContent = family === 'helvetica' ? pdfTxt(d.textContent) : d.textContent;
     }
   });
   clone.removeAttribute('style');
-  clone.setAttribute('font-family', 'helvetica');
+  clone.setAttribute('font-family', family);
   return clone;
 }
+function registerInter(doc) {
+  const F = window.INTER_FONTS;
+  if (!F) return false;
+  [['Inter-Regular.ttf', 'Inter', 'normal', F.regular], ['Inter-SemiBold.ttf', 'Inter', 'bold', F.semibold], ['Inter-ExtraBold.ttf', 'InterXB', 'normal', F.extrabold]]
+    .forEach(([file, name, style, b64]) => { doc.addFileToVFS(file, b64); doc.addFont(file, name, style); });
+  return true;
+}
+async function deliverPdf(doc, name) {
+  const blob = doc.output('blob');
+  const file = new File([blob], name, { type: 'application/pdf' });
+  let shared = false;
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); shared = true; } catch (e) { if (e && e.name === 'AbortError') shared = true; }
+  }
+  if (!shared) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+  window.__lastPdf = blob;
+}
+
+/* =====================================================================
+   Druck-Bauplan Regal – gestaltet wie ein Heft (Inter, Schwarz-Weiß)
+   ===================================================================== */
+async function exportRegalPdf(tool, root, btn) {
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Bauplan wird gesetzt …'; }
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:900px;overflow:hidden';
+  document.body.appendChild(host);
+  try {
+    await loadPdfLibs();
+    const plan = tool.compute(values(tool));
+    if (plan.fatal || !plan.data) throw new Error('Die Planung hat Fehler – bitte zuerst die roten Hinweise beheben.');
+    const D = plan.data, v = D.v, G = D.G, R = D.R;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const hasInter = registerInter(doc);
+    const F = { r: hasInter ? ['Inter', 'normal'] : ['helvetica', 'normal'], b: hasInter ? ['Inter', 'bold'] : ['helvetica', 'bold'], xb: hasInter ? ['InterXB', 'normal'] : ['helvetica', 'bold'] };
+    const T = s => hasInter ? String(s) : pdfTxt(s);
+    const ML = 16, MR = 16, W = 210 - ML - MR, TOP = 16, BOT = 280;
+    const INK = [24, 24, 24], GREY = [120, 120, 120], LINE = [210, 210, 210];
+    const date = new Date().toLocaleDateString('de-DE');
+    const pname = (v.pname || 'das regal').trim();
+    let y = TOP, pageTitle = '', first = true;
+    const font = (f, size, col = INK) => { doc.setFont(...F[f]); doc.setFontSize(size); doc.setTextColor(...col); };
+    const ptmm = pt => pt * 0.3528;
+    const write = (txt, x, yy, f, size, opt = {}) => { font(f, size, opt.col); doc.text(T(txt), x, yy, opt); };
+    const para = (txt, f = 'r', size = 9, col = INK, gap = 2, x = ML, w = W) => {
+      font(f, size, col);
+      const lh = ptmm(size) * 1.42;
+      doc.splitTextToSize(T(txt), w).forEach(l => { need(lh); doc.text(l, x, y + lh * 0.75); y += lh; });
+      y += gap;
+    };
+    const rule = (yy, wdt = 0.5, col = INK) => { doc.setDrawColor(...col); doc.setLineWidth(wdt); doc.line(ML, yy, ML + W, yy); };
+    const newPage = title => {
+      if (!first) doc.addPage(); first = false;
+      pageTitle = title; y = TOP;
+      if (title) { write(title, ML, y + 9, 'xb', 25); rule(y + 13); y += 19; }
+    };
+    const need = h => { if (y + h > BOT) newPage(pageTitle + (pageTitle.endsWith('(Forts.)') ? '' : ' (Forts.)')); };
+    const circ = (ch, x, yy, r = 1.9) => { doc.setDrawColor(...INK); doc.setLineWidth(0.25); doc.circle(x, yy, r, 'S'); write(ch, x, yy + 0.9, 'b', 6.5, { align: 'center' }); };
+    const svgEl = str => { host.innerHTML = str; return host.querySelector('svg'); };
+    const putSvg = async (svg, x, yy, maxW, maxH, opt = {}) => {
+      const vb = svg.viewBox.baseVal;
+      let w = maxW, h = maxW * vb.height / vb.width;
+      if (h > maxH) { h = maxH; w = h * vb.width / vb.height; }
+      const px = opt.center === false ? x : x + (maxW - w) / 2;
+      await doc.svg(prepSvg(svg, w, { family: hasInter ? 'Inter' : 'helvetica', mono: opt.mono }), { x: px, y: yy, width: w, height: h });
+      return h;
+    };
+    // Tabelle im Stil des Vorbilds: kleine graue Kopfzeile, Haarlinien, erste Spalte fett
+    const table = (cols, rows, o = {}) => {
+      const xs = []; let acc = ML; cols.forEach(c => { xs.push(acc); acc += c.w * W; });
+      const head = () => {
+        need(9);
+        cols.forEach((c, i) => write(c.h, xs[i] + 1, y + 4, 'r', 7, { col: GREY }));
+        y += 5.5; rule(y, 0.45); y += 0.5;
+      };
+      head();
+      rows.forEach(r => {
+        const cells = r.map((c, i) => { font(i === 0 && o.boldFirst !== false ? 'b' : 'r', i === 0 && o.boldFirst !== false ? 9 : 8.3); return doc.splitTextToSize(T(c == null ? '' : c), cols[i].w * W - 2.5); });
+        const lines = Math.max(...cells.map(c => c.length));
+        const rh = Math.max(7.2, lines * 3.6 + 3.4);
+        if (y + rh > BOT) { newPage(pageTitle.endsWith('(Forts.)') ? pageTitle : pageTitle + ' (Forts.)'); head(); }
+        cells.forEach((c, i) => {
+          font(i === 0 && o.boldFirst !== false ? 'b' : 'r', i === 0 && o.boldFirst !== false ? 9 : 8.3);
+          c.forEach((l, j) => doc.text(l, xs[i] + 1, y + 4.6 + j * 3.6, cols[i].right ? { align: 'right' } : undefined));
+        });
+        y += rh; rule(y, 0.15, LINE);
+      });
+      y += 4;
+    };
+
+    const geoFor = D.geoFor;
+    const fachN = D.nFach, nBox = D.nBox;
+    const formName = { I: 'I-Form', L: 'L-Form', U: 'U-Form' }[v.form] + (v.insel !== 'none' ? ' mit Insel' : '');
+    const total = Math.round(D.holz + D.besch);
+    const allCubes = layoutCubes(R, v, G, geoFor, D.inselH, {});
+
+    // ================= 1 · Titel =================
+    newPage('');
+    font('b', 7.5, INK); doc.text(T(`BAUPLAN · ${formName.toUpperCase()} · ${date}`), ML, y + 4, { charSpace: 0.9 });
+    y += 9;
+    font('xb', 46, INK);
+    const tl = doc.splitTextToSize(T(pname), W);
+    tl.forEach(l => { doc.text(l, ML - 1, y + 15); y += 16.5; });
+    y += 3;
+    para(nBox ? 'für IKEA SAMLA 65 · 45 · 22 l' : 'Regal mit Böden', 'r', 10.5, INK, 0);
+    para(`aus Kantholz und Dachlatten${D.osbSheets ? ' · Böden aus OSB' : ''}`, 'r', 10.5, INK, 3);
+    rule(y, 0.5); y += 6;
+    const coverH = 150;
+    await putSvg(svgEl(iso3dSvg(allCubes, { w: v.Wb, d: v.D }, 'vr', '', { pal: 'mono', raw: true, noFloor: true })), ML, y, W, coverH);
+    y += coverH + 6;
+    const big = (n, l1, l2, x) => { write(String(n), x, y + 11, 'xb', 34); font('xb', 34); const w = doc.getTextWidth(T(String(n))); write(l1, x + w + 2, y + 5.5, 'b', 9); write(l2, x + w + 2, y + 9.5, 'r', 7, { col: GREY }); };
+    if (nBox) big(nBox, 'Boxen', `${D.boxes['65']}× 65 · ${D.boxes['45']}× 45 · ${D.boxes['22']}× 22 l`, ML);
+    big(fachN, 'Fächer', `in ${D.mods.reduce((s, m) => s + m.mult, 0)} Modulen`, ML + (nBox ? 66 : 0));
+    big(total, '€ Material', 'ohne Boxen, ca.', ML + (nBox ? 122 : 60));
+    y += 17;
+    para(`${formName} · Raum ${cmS(v.Wb)} × ${cmS(v.D)} cm · Regalhöhe ${cmS(v.H)} · Tiefe ${cmS(v.T)} · Kantholz ${v.kt} × ${v.kb} mm`, 'r', 8, GREY, 0);
+
+    // ================= 2 · Material =================
+    newPage('Material');
+    para(`Für die ganze Planung: ${D.mods.reduce((s, m) => s + m.mult, 0)} Module mit ${fachN} Fächern. Mengen inkl. Verschnitt.`, 'r', 9, INK, 3);
+    const sm = (v.stock / 1000).toFixed(1).replace('.', ',');
+    const holzRows = [[String(D.kBins.length), `Kantholz sägerau, ${sm} m`, `${v.kt} × ${v.kb} mm`, 'A  B'], [String(D.lBins.length), `Dachlatte sägerau, ${sm} m`, `${v.lh} × ${v.lt} mm`, D.querFach.size ? 'C  Q' : 'C']];
+    if (D.osbSheets) holzRows.push([String(D.osbSheets), 'OSB-Platte 250 × 125', `${v.osb}${v.osb2 !== v.osb ? ' / ' + v.osb2 : ''} mm`, 'Böden / Schrank']);
+    table([{ h: 'Menge', w: 0.1 }, { h: 'Holz', w: 0.42 }, { h: 'Querschnitt', w: 0.24 }, { h: 'Teile', w: 0.24 }], holzRows);
+    const buy = plan.buy.filter(r => !/^Kantholz|^Dachlatte|^OSB-Platte|SAMLA/.test(r[0]));
+    table([{ h: 'Menge', w: 0.12 }, { h: 'Beschläge', w: 0.48 }, { h: 'Wofür', w: 0.4 }], buy.map(r => [r[1].replace(' Stk', ''), r[0], r[2]]));
+    if (nBox) table([{ h: 'Menge', w: 0.12 }, { h: 'Boxen', w: 0.48 }, { h: 'Typ', w: 0.4 }], ['65', '45', '22'].filter(k => D.boxes[k]).map(k => [String(D.boxes[k]), 'IKEA SAMLA mit Deckel', { '65': '65 l · 57 × 39 × 42 cm', '45': '45 l · 57 × 39 × 28 cm', '22': '22 l · 39 × 28 × 28 cm' }[k]]));
+    need(14);
+    doc.setFillColor(238, 238, 236); doc.rect(ML, y, W, 10, 'F');
+    write(`ca. ${total} €`, ML + 4, y + 6.4, 'b', 9);
+    font('b', 9); const tw = doc.getTextWidth(T(`ca. ${total} €`));
+    write(` Baumaterial ohne Boxen (Holz ca. ${Math.round(D.holz)} €, Preise laut Eingabe) · ca. ${Math.round(total / fachN)} € pro Fach`, ML + 4 + tw, y + 6.4, 'r', 8.3);
+    y += 16;
+    write('Werkzeug', ML, y + 4, 'xb', 12); y += 8;
+    para(`Kapp- oder Handkreissäge · Akkuschrauber · Holzbohrer 3 mm · Steinbohrer 8 mm · Winkel · Maßband · Wasserwaage · 2 Schraubzwingen · Schleifklotz K80${D.osbSheets ? ' · Stichsäge (OSB-Ausschnitte)' : ''}`, 'r', 8.5);
+
+    // ================= 3 · Zuschnitt =================
+    newPage('Zuschnitt');
+    // Legende
+    doc.setLineDashPattern([0.8, 0.6], 0); doc.setDrawColor(...INK); doc.setLineWidth(0.25); doc.line(ML + W - 42, TOP + 6, ML + W - 35, TOP + 6); doc.setLineDashPattern([], 0);
+    write('Schnitt', ML + W - 34, TOP + 7, 'r', 6.5, { col: GREY });
+    const hatch = (x, yy, w, h) => {
+      doc.setDrawColor(150); doc.setLineWidth(0.12);
+      for (let t = -h; t < w; t += 1.1) { const u0 = Math.max(0, -t), u1 = Math.min(h, w - t); if (u1 > u0) doc.line(x + t + u0, yy + h - u0, x + t + u1, yy + h - u1); }
+      doc.setDrawColor(...INK); doc.setLineWidth(0.25); doc.rect(x, yy, w, h, 'S');
+    };
+    hatch(ML + W - 20, TOP + 4.6, 5, 2.6); write('Rest', ML + W - 14, TOP + 7, 'r', 6.5, { col: GREY });
+    const NAMES = { A: 'Balken', B: 'Pfosten', C: 'Schienen', Q: 'Querlatten' };
+    const barGroup = (bins, stockName, letters) => {
+      const groups = new Map();
+      bins.forEach(b => { const k = b.items.map(i => i.label + i.len).join('|'); if (groups.has(k)) groups.get(k).n++; else groups.set(k, { b, n: 1 }); });
+      [...groups.values()].sort((g1, g2) => g1.b.items[0].label.localeCompare(g2.b.items[0].label) || g2.b.items[0].len - g1.b.items[0].len).forEach(({ b, n }) => {
+        const labs = [...new Set(b.items.map(i => i.label))];
+        need(16);
+        let x = ML;
+        labs.forEach(l => { circ(l, x + 2, y + 2.6); x += 5; });
+        write(labs.map(l => NAMES[l] || l).join(' + '), x + 0.5, y + 3.6, 'b', 9.5);
+        font('b', 9.5); const nw = doc.getTextWidth(T(labs.map(l => NAMES[l] || l).join(' + ')));
+        write(stockName, x + 2 + nw, y + 3.6, 'r', 7.5);
+        write(`${n} ${n === 1 ? 'Holz' : 'Hölzer'} → ${n * b.items.length} Teile`, ML + W, y + 3.6, 'b', 7.5, { align: 'right' });
+        y += 6;
+        write(b.items.map(i => cmS(i.len)).join(' · '), ML + 16, y + 2.4, 'r', 6.5, { col: GREY });
+        y += 3.6;
+        const sc = W / v.stock, bh = 3.6, shown = Math.min(n, 10);
+        for (let k = 0; k < shown; k++) {
+          need(bh + 1.2);
+          let px = ML;
+          doc.setDrawColor(...INK); doc.setLineWidth(0.25); doc.setFillColor(246, 246, 244); doc.rect(ML, y, W, bh, 'FD');
+          b.items.forEach((it, j) => {
+            const w = it.len * sc;
+            write(it.label, px + w / 2, y + bh * 0.72, 'b', 5.5, { align: 'center' });
+            px += w;
+            if (j < b.items.length - 1 || px < ML + W - 0.5) { doc.setLineDashPattern([0.7, 0.5], 0); doc.line(px, y, px, y + bh); doc.setLineDashPattern([], 0); }
+            px += v.kerf * sc;
+          });
+          if (ML + W - px > 0.6) hatch(px, y, ML + W - px, bh);
+          y += bh + 1.1;
+        }
+        if (n > shown) { write(`… und ${n - shown} weitere gleich`, ML, y + 3, 'r', 7.5, { col: GREY }); y += 4.5; }
+        y += 2.5; rule(y, 0.15, LINE); y += 3;
+      });
+    };
+    barGroup(D.kBins, `Kantholz ${sm} m`);
+    barGroup(D.lBins, `Dachlatte ${sm} m`);
+    if (D.osbParts.length) {
+      need(30); write('OSB-Zuschnitt', ML, y + 4, 'xb', 12); y += 8;
+      table([{ h: 'Teil', w: 0.52 }, { h: 'Stk', w: 0.1 }, { h: 'Maß (cm)', w: 0.22 }, { h: 'Stärke', w: 0.16 }], D.osbParts.map(p => [p.name, String(p.qty), `${cmS(p.l)} × ${cmS(p.b)}`, `${p.t} mm`]));
+      para(`${D.osbSheets} Platte(n) 250 × 125 inkl. Verschnitt – im Baumarkt nach dieser Liste schneiden lassen.`, 'r', 8, GREY);
+    }
+    para('Die Reste werden zu Schablonen: Pfosten- und Balkenreste → Abstandshölzer, Lattenreste → Endanschläge. Immer mit der Maßlatte am frischen Ende anlegen.', 'r', 8, INK);
+
+    // ================= 4 · Teile =================
+    newPage('Teile');
+    const T0 = { len: 0, items: [] };
+    const bar = (len, w, h) => [{ x0: 0, x1: len, y0: 0, y1: w, z0: 0, z1: h, c: 'wood' }];
+    const cards = [];
+    Object.entries(D.bal).forEach(([L, q]) => cards.push(['A', 'Balken', q, cmS(+L), bar(+L, v.kt, v.kb)]));
+    Object.entries(D.posts).forEach(([L, q]) => cards.push(['B', 'Pfosten', q, cmS(+L), [{ x0: 0, x1: v.kb, y0: 0, y1: v.kt, z0: 0, z1: +L, c: 'wood' }]]));
+    cards.push(['C', 'Schiene', D.latt.filter(i => i.label === 'C').length, cmS(v.T), [{ x0: 0, x1: v.lt, y0: 0, y1: v.T, z0: 0, z1: v.lh, c: 'rail' }]]);
+    if (D.querFach.size) cards.push(['Q', 'Querlatte', D.latt.filter(i => i.label === 'Q').length, [...D.querFach].join(' / '), [{ x0: 0, x1: 900, y0: 0, y1: v.lt, z0: 0, z1: v.lh, c: 'rail' }]]);
+    const m0 = D.mods[0];
+    const frameCubes = [];
+    moduleCubes(m0, v, m0.G, m0.H, (a0, a1, c0, c1, z0, z1, c) => frameCubes.push({ x0: a0, x1: a1, y0: c0, y1: c1, z0, z1, c }), { frames: [[0, v.kt]], rails: false });
+    cards.push(['D', 'Lochband', D.mods.reduce((s, m) => s + 2 * m.mult, 0), 'Diagonale je Rahmen', frameCubes, [[0, v.kt + 2, m0.H - v.kb, m0.len, v.kt + 2, v.kb, '#111', 2.2]]]);
+    cards.push(['E', D.nFloor ? 'Winkel (Wand/Boden)' : 'Wandwinkel', D.nWall + D.nFloor, '90 × 90 × 40', [{ x0: 0, x1: 40, y0: 0, y1: 90, z0: 0, z1: 3, c: 'metal' }, { x0: 0, x1: 40, y0: 0, y1: 3, z0: 0, z1: 90, c: 'metal' }]]);
+    if (D.osbParts.length) cards.push(['O', 'OSB-Teile', D.osbParts.reduce((s, p) => s + p.qty, 0), `${v.osb} mm`, [{ x0: 0, x1: 800, y0: 0, y1: 600, z0: 0, z1: 18, c: 'osb' }]]);
+    if (nBox) cards.push(['F', 'SAMLA-Box', nBox, '65 / 45 / 22 l', [{ x0: 0, x1: 390, y0: 0, y1: 570, z0: 0, z1: 280, c: 'b45' }, { x0: 0, x1: 390, y0: 600, y1: 1170, z0: 0, z1: 420, c: 'b65' }]]);
+    const cw = W / 3, ch = 62;
+    for (let i = 0; i < cards.length; i++) {
+      const [L, name, q, sub, cubes, lines] = cards[i];
+      const col = i % 3;
+      if (col === 0 && i) y += ch + 4;
+      if (col === 0) need(ch + 4);
+      const x = ML + col * cw;
+      doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(x + 1, y, x + cw - 3, y);
+      const bb = cubes.reduce((a, c) => [Math.max(a[0], c.x1), Math.max(a[1], c.y1)], [1, 1]);
+      await putSvg(svgEl(iso3dSvg(cubes, { w: bb[0], d: bb[1] }, 'vr', '', { pal: 'mono', raw: true, noFloor: true, lines: lines || [], sw: Math.max(bb[0], bb[1], 300) / 260 })), x + 2, y + 3, cw - 6, ch - 17);
+      circ(L, x + 3, y + ch - 9.5);
+      write(name, x + 6.5, y + ch - 8.6, 'b', 9);
+      write(`×${q}`, x + cw - 3, y + ch - 8.6, 'b', 9, { align: 'right' });
+      write(sub, x + 1, y + ch - 3.6, 'r', 7.5, { col: GREY });
+    }
+    y += ch + 4;
+
+    // ================= 5 · Layout =================
+    newPage('Layout');
+    para('Grundriss von oben. Pfosten dunkel, Ecken bleiben frei – dort ließe sich keine Box herausziehen.', 'r', 8.5, INK, 2);
+    const out = root.querySelector('.out');
+    const figs = [...out.querySelectorAll('figure.drw')].filter(f => !f.classList.contains('iso'));
+    const grundFig = figs[0], frontFigs = figs.slice(1, 1 + R.rows.length);
+    y += await putSvg(grundFig.querySelector('svg'), ML, y, W, 110, { mono: true }) + 4;
+    write('Fächer', ML, y + 4, 'xb', 12); y += 8;
+    const fRows = [];
+    R.rows.forEach(r => {
+      const gg = geoFor(r.key);
+      r.items.forEach((f, i) => {
+        let pl = '', h = '', inh = '';
+        if (f.t === 'samla') {
+          const lv = samlaLevels(f.s, v, gg); const c = { '65': 0, '45': 0, '22': 0 }; lv.forEach(l => { c[l.box] += l.box === '22' ? 2 : 1; });
+          pl = lv.map(l => l.plate).join(''); h = lv.map(l => cmS(l.top)).join(' · ');
+          inh = Object.entries(c).filter(e => e[1]).map(e => `${e[1]}× ${e[0]}`).join(' + ');
+        } else if (f.t === 'boeden' || f.t === 'schrank') { h = boardLevels(f.n, gg, f.t === 'schrank').map(cmS).join(' · '); inh = f.t === 'schrank' ? 'Schrank' : `${f.n} Böden`; }
+        else inh = f.t === 'frei' ? 'Stapelfläche' : 'Lücke';
+        const nm = f.t === 'samla' ? f.s.replace('A', '') : { boeden: 'Böden', frei: 'frei', schrank: 'Schrank', luecke: 'Lücke' }[f.t];
+        fRows.push([i ? '' : ROWDEF[r.key] + (r.mult === 2 ? ' ×2' : ''), `${i + 1} ${nm}`, pl, h, inh]);
+      });
+    });
+    table([{ h: 'Wand', w: 0.16 }, { h: 'Fach', w: 0.13 }, { h: 'Platten', w: 0.11 }, { h: 'Schienen- / Boden-Oberkante ab Boden (cm)', w: 0.4 }, { h: 'Inhalt', w: 0.2 }], fRows);
+    para(`Pfostenabstand (Raster) SAMLA ${cmS(G.raster)} · lichte Weite zwischen den Schienen ${cmS(v.clear)} · Regaltiefe ${cmS(v.T)} · Wandabstand ${cmS(v.wallGap)}`, 'r', 7.5, GREY);
+    for (let i = 0; i < frontFigs.length; i++) {
+      const r = R.rows[i];
+      const svg = frontFigs[i].querySelector('svg'), vb = svg.viewBox.baseVal;
+      const h = Math.min(118, W * vb.height / vb.width);
+      if (y + h + 12 > BOT) newPage('Layout (Forts.)');
+      write(`Ansicht ${ROWDEF[r.key]}${r.mult === 2 ? ' (beide Seiten)' : ''}`, ML, y + 4, 'b', 10); y += 7;
+      y += await putSvg(svg, ML, y, W, 118, { mono: true }) + 5;
+    }
+
+    // ================= 6 · Schablonen =================
+    newPage('Schablonen');
+    para('Einmal aus Resten gebaut – danach wird beim Bau nichts mehr gemessen.', 'r', 9, INK, 3);
+    write('1  Maßlatten', ML, y + 4, 'b', 10); write('mit Endanschlag, je eine pro Länge', ML + 25, y + 4, 'r', 7.5, { col: GREY }); y += 8;
+    const lens = [v.T, ...Object.keys(D.bal).map(Number), ...Object.keys(D.posts).map(Number)];
+    write(lens.map(cmS).join(' · '), ML + W / 2, y + 3, 'xb', 13, { align: 'center' }); y += 6;
+    doc.setDrawColor(...INK); doc.setLineWidth(0.3); doc.setFillColor(250, 250, 248); doc.rect(ML + 6, y, W - 12, 3.2, 'FD');
+    doc.setFillColor(242, 201, 76); doc.rect(ML + 3, y - 1.2, 4, 5.6, 'FD'); doc.setFillColor(200, 40, 40); doc.rect(ML + W - 8, y, 2, 3.2, 'F');
+    y += 9; write('Endanschlag', ML + 2, y, 'r', 7, { col: GREY }); write('Farbmarke', ML + W - 2, y, 'r', 7, { col: GREY, align: 'right' }); y += 7;
+    if (nBox) {
+      write('2  Abstandsplatten A–D', ML, y + 4, 'b', 10); write(`OSB 15 mm, ca. ${cmS(v.T + 60)} breit, Leisten innen ${cmS(v.T)} auseinander`, ML + 44, y + 4, 'r', 7.5, { col: GREY }); y += 9;
+      const pk = ['A', 'B', 'C', 'D'], sc = 0.075, pw = 34, gap = (W - 4 * pw) / 3, base = y + G.plates.D * sc;
+      need(G.plates.D * sc + 12);
+      pk.forEach((k, i) => {
+        const h = G.plates[k] * sc, x = ML + i * (pw + gap);
+        doc.setDrawColor(...INK); doc.setLineWidth(0.35); doc.setFillColor(255, 255, 255); doc.rect(x, base - h, pw, h, 'FD');
+        doc.setFillColor(242, 201, 76); doc.rect(x, base - h, 2.2, h, 'FD'); doc.rect(x + pw - 2.2, base - h, 2.2, h, 'FD');
+        write(k, x + pw / 2, base - h / 2 + 3, 'xb', 15, { align: 'center' });
+        write(cmS(G.plates[k]), x + pw / 2, base + 5, 'b', 9, { align: 'center' });
+      });
+      y = base + 11;
+    }
+    write(`${nBox ? 3 : 2}  Schraubschablone`, ML, y + 4, 'b', 10); write('linke Schiene Bohrbild A, rechte B · Maße in cm ab Innenkante der Anschläge', ML + 42, y + 4, 'r', 7.5, { col: GREY }); y += 8;
+    need(40);
+    const sx = ML + 10, sy = y + 6, sw2 = 88, sh2 = 50, k5 = 0.6;
+    doc.setDrawColor(...INK); doc.setLineWidth(0.3); doc.rect(sx, sy, sw2 * k5, sh2 * k5);
+    doc.setFillColor(242, 201, 76); doc.rect(sx - 2, sy - 3, sw2 * k5 + 5, 3, 'FD'); doc.rect(sx + sw2 * k5, sy - 3, 3, sh2 * k5 + 3, 'FD');
+    const hp = [['A', 20, 15, [200, 40, 40]], ['A', G.hole2, 35, [200, 40, 40]], ['B', G.hole2, 15, [40, 80, 200]], ['B', 20, 35, [40, 80, 200]]];
+    hp.forEach(([L, fx, fy, c]) => { const hx = sx + (sw2 - fx) * k5, hy = sy + fy * k5; doc.setDrawColor(...c); doc.setLineWidth(0.4); doc.circle(hx, hy, 1.4, 'S'); write(L, hx - 3.4, hy + 1.1, 'b', 7, { col: c }); });
+    write('Anschlag oben', sx + 4, sy - 4.5, 'r', 6.5, { col: GREY }); write('Anschlag Ende', sx + sw2 * k5 + 5, sy + 8, 'r', 6.5, { col: GREY });
+    write(`Löcher ${cmS(20)} und ${cmS(G.hole2)} vom Ende · 1,5 und 3,5 von oben · Ø 3 mm vorbohren`, sx, sy + sh2 * k5 + 6, 'r', 7.5);
+    const ax = ML + 100;
+    write(`${nBox ? 4 : 3}  Abstandshölzer & Prüfstab`, ax, y + 4, 'b', 10);
+    let ay = y + 10;
+    [[cmS(G.sgap), 'Pfostenabstand SAMLA-Fächer'], ...[...new Set(R.rows.flatMap(r => r.items.filter(f => f.t !== 'samla' && f.t !== 'luecke').map(f => f.w)))].map(w => [cmS(w), 'Pfostenabstand Fach dieser Breite']), ...(nBox ? [[cmS(v.clear), 'Prüfstab: muss leicht zwischen den Schienen durchgehen']] : [])]
+      .forEach(([a, b]) => { write(a, ax, ay + 3, 'xb', 11); write(b, ax + 18, ay + 3, 'r', 7.5); ay += 6.5; });
+    y = Math.max(sy + sh2 * k5 + 12, ay + 4);
+    if (nBox) para(`Andere Box? Randmaß r messen (Boxboden bis Unterkante Rand). Platten: A/C = r ${20 - v.kb < 0 ? '−' : '+'} ${cmS(Math.abs(20 - v.kb))} · B/D = r − 0,1 – die App rechnet das automatisch.`, 'r', 7.5, GREY);
+    para('Auf den folgenden Seiten: Schablonen im Maßstab 1:1 – mit 100 % / „Tatsächliche Größe“ drucken und das Kontrollmaß nachmessen.', 'r', 7.5, GREY);
+    for (const tile of out.querySelectorAll('.tpls svg.tile')) {
+      doc.addPage(); pageTitle = 'Schablone 1:1';
+      await doc.svg(prepSvg(tile, 180, { family: hasInter ? 'Inter' : 'helvetica' }), { x: 15, y: 12, width: 180, height: 255 });
+    }
+
+    // ================= 7 · Aufbau =================
+    const mod = { len: m0.len, items: m0.items };
+    const gg0 = m0.G, H0 = m0.H;
+    const ill = (o, extra = {}) => {
+      const cubes = [];
+      moduleCubes(mod, v, gg0, H0, (a0, a1, c0, c1, z0, z1, c) => cubes.push(extra.lying ? { x0: a0, x1: a1, y0: H0 - z1, y1: H0 - z0, z0: c0, z1: c1, c } : { x0: a0, x1: a1, y0: c0, y1: c1, z0, z1, c }), o);
+      (extra.add || []).forEach(c => cubes.push(c));
+      const room = extra.lying ? { w: mod.len, d: H0 } : { w: mod.len, d: v.T };
+      return svgEl(iso3dSvg(cubes, room, 'vr', '', { pal: 'mono', raw: true, noFloor: true, lines: extra.lines || [] }));
+    };
+    const partsLine = arr => {
+      let x = ML;
+      arr.forEach(([L, txt]) => {
+        if (L) { circ(L, x + 2, y + 2.4); x += 5; }
+        write(txt, x, y + 3.4, 'r', 8); font('r', 8); x += doc.getTextWidth(T(txt)) + 6;
+      });
+      y += 7;
+    };
+    const nPostsTot = Object.values(D.posts).reduce((a, b) => a + b, 0), nBalTot = Object.values(D.bal).reduce((a, b) => a + b, 0);
+    const steps = [
+      ['Rahmen liegend bauen', ill({ frames: [[0, v.kt]], rails: false, spacers: true }, { lying: true }), `Balken flach hinlegen, ersten Pfosten bündig mit den Enden. Abstandshölzer (gelb) einhängen, nächsten Pfosten dagegen, verschrauben – bis zum letzten. Der muss wieder bündig sein. Pro Modul 2 Rahmen.`, [['A', `Balken ×${nBalTot}`], ['B', `Pfosten ×${nPostsTot}`], ['', `${G.slim ? '5 × 100' : '6 × 120'} ×${D.n6}`]]],
+      ['Rechtwinklig prüfen, Lochband', ill({ frames: [[0, v.kt]], rails: false }, { lying: true, lines: [[0, H0, v.kt + 2, m0.len, 0, v.kt + 2, '#c62828', 2.2], [0, 0, v.kt + 2, m0.len, H0, v.kt + 2, '#111', 1.4]] }), 'Beide Diagonalen messen. Gleich lang = rechtwinklig. Dann eine Diagonale Lochband auf die Rückseite schrauben. Zweiten Rahmen genauso bauen.', [['D', `Lochband ${Math.ceil(D.lochband / 1000)} m`], ['', `4 × 35 ×${D.n4x35}`]]],
+      ['Aufstellen', ill({ rails: false }), `Unterlegplatten unterlegen. Hinteren Rahmen mit ${cmS(v.wallGap)} cm Wandabstand aufrichten, vorderen ${cmS(v.T)} cm davor. Eine Zwinge oder ein Helfer hält ihn.${v.insel !== 'none' ? ' Insel: am Boden verschrauben.' : ''}`, [['', `Unterlegplatten ×${D.nPads}`]]],
+      ['Schienen von unten nach oben', ill({ rails: 2, plate: true }), 'Abstandsplatte (gelb) auf den Balken bzw. die untere Schiene stellen, Schiene oben auflegen, mit der Schraubschablone vorbohren, 2 Schrauben je Ende. Platte herausziehen, nächste laut Tabelle „Fächer“. Erst links bis oben, dann rechts.', [['C', `Schiene ×${D.latt.filter(i => i.label === 'C').length}`], ['', `${G.slim ? '4 × 50' : '4,5 × 60'} ×${D.nRailScrews}`]]],
+      ['An der Wand sichern', ill({}, { add: [{ x0: -150, x1: mod.len + 150, y0: -v.wallGap - 40, y1: -v.wallGap, z0: 0, z1: H0 + 120, c: 'wall' }, { x0: mod.len * 0.2, x1: mod.len * 0.2 + 40, y0: -v.wallGap, y1: v.kt, z0: H0, z1: H0 + 3, c: 'metal' }, { x0: mod.len * 0.75, x1: mod.len * 0.75 + 40, y0: -v.wallGap, y1: v.kt, z0: H0, z1: H0 + 3, c: 'metal' }] }), `Oben zwei Winkel je Modul in die Wand dübeln. Mehrere Module: benachbarte Pfosten verschrauben${v.form !== 'I' ? ', in den Ecken oben einen Kantholz-Rest über die Stoßkante legen und verschrauben' : ''}.${D.osbSheets ? ' Danach Böden auflegen und den Schrank verkleiden.' : ''}`, [['E', `Winkel ×${D.nWall + D.nFloor}`], ['', `Dübel 8 mm ×${D.nWall}`]]],
+      [nBox ? 'Boxen einhängen' : 'Fertig einräumen', ill({ boxes: true }), nBox ? `Prüfstab ${cmS(v.clear)} zwischen die Schienen halten – er muss leicht durchgehen. Schienen-Oberkanten kurz anschleifen. Schweres nach unten, max. ca. 15 kg je Box.` : 'Böden auflegen und verschrauben, Schweres nach unten.', nBox ? [['F', `SAMLA ×${nBox}`]] : []],
+    ];
+    for (let i = 0; i < steps.length; i++) {
+      if (i % 2 === 0) newPage(`Aufbau ${i / 2 + 1}`);
+      const [title, svg, txt, pl] = steps[i];
+      write(String(i + 1), ML, y + 10, 'xb', 26);
+      write(title, ML + 16, y + 7.5, 'b', 11.5);
+      y += 13;
+      y += await putSvg(svg, ML + 16, y, W - 16, 86) + 3;
+      const keep = y; y = keep;
+      para(txt, 'r', 8.8, INK, 2, ML + 16, W - 16);
+      if (pl.length) { doc.setDrawColor(...LINE); doc.setLineWidth(0.15); doc.line(ML + 16, y, ML + W, y); y += 1.5; const xs = y; partsLine(pl.map(p => p)); }
+      y += 5;
+    }
+    const extra = plan.steps.filter(s => /Böden:|Schrank/.test(s)).map(s => s.replace(/<[^>]+>/g, ''));
+    if (extra.length) { need(30); write('Böden & Schrank', ML, y + 5, 'xb', 13); y += 10; extra.forEach(t => para('• ' + t, 'r', 8.8)); }
+
+    // ================= 8 · Hinweise =================
+    newPage('Hinweise & Sicherheit');
+    plan.msgs.forEach(m => para((m[0] === 'err' ? 'Fehler: ' : m[0] === 'warn' ? 'Achtung: ' : '') + m[1], m[0] === 'info' ? 'r' : 'b', 9, m[0] === 'err' ? [150, 30, 30] : INK, 2.5));
+    y += 3;
+    write('Sicherheit', ML, y + 5, 'xb', 13); y += 10;
+    para(`Regal ${cmS(v.H)} hoch, ${cmS(v.T)} tief: jedes Modul oben an der Wand sichern${v.insel !== 'none' ? ', die Insel am Boden' : ''}. Max. ca. 15 kg je Box, Schweres nach unten. Vor dem Bohren Leitungen prüfen. Im Keller Unterlegplatten verwenden und das Holz einige Tage akklimatisieren.`, 'r', 9);
+    para('Erst eine Box kaufen und lichte Weite und Randmaß r messen, dann ein Probefach bauen – erst danach alles zuschneiden.', 'b', 9);
+    y += 4;
+    para('Dieser Bauplan ist eine Anleitung für den Eigenbau, erzeugt mit der Bauplan App. Maße, Tragfähigkeit und Standsicherheit hängen von Holz, Ausführung, Boden und Wand ab und sind vom Nachbauer zu prüfen. Keine Haftung für Schäden aus dem Nachbau. IKEA und SAMLA sind Marken von Inter IKEA Systems B.V.; dieser Plan steht in keiner Verbindung zu IKEA.', 'r', 7, GREY);
+
+    // Fußzeilen
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i);
+      doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(ML, 286, ML + W, 286);
+      write(`${pname} · Bauplan ${date}`, ML, 290.5, 'r', 7, { col: GREY });
+      write(`${i} / ${n}`, ML + W, 290.5, 'r', 7, { col: GREY, align: 'right' });
+    }
+    await deliverPdf(doc, `${pname.replace(/[^\wäöüÄÖÜß-]+/g, '-')}-Bauplan-${new Date().toISOString().slice(0, 10)}.pdf`);
+  } catch (e) {
+    console.error(e);
+    alert('PDF konnte nicht erstellt werden: ' + (e && e.message ? e.message : e));
+  } finally {
+    host.remove();
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+
+toolRegal.printPdf = exportRegalPdf;
 
 async function exportPdf(tool, root, btn) {
   const label = btn ? btn.textContent : '';
@@ -1366,13 +1810,14 @@ async function exportPdf(tool, root, btn) {
     await loadPdfLibs();
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const FF = registerInter(doc) ? 'Inter' : 'helvetica', tx = t => FF === 'Inter' ? String(t) : pdfTxt(t);
     const M = 12, W = 210 - 2 * M, PH = 297;
     let y = M;
     const need = h => { if (y + h > PH - M) { doc.addPage(); y = M; } };
     const text = (t, size = 10, style = 'normal', gap = 1.5, color = [31, 41, 51]) => {
-      doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(...color);
+      doc.setFont(FF, style === 'bold' ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...color);
       const lh = size * 0.3528 * 1.3;
-      doc.splitTextToSize(pdfTxt(t).trim(), W).forEach(l => { need(lh); doc.text(l, M, y + lh * 0.78); y += lh; });
+      doc.splitTextToSize(tx(t).trim(), W).forEach(l => { need(lh); doc.text(l, M, y + lh * 0.78); y += lh; });
       y += gap;
     };
     const putSvg = async (svg, maxH = 245) => {
@@ -1380,7 +1825,7 @@ async function exportPdf(tool, root, btn) {
       let w = W, h = W * vb.height / vb.width;
       if (h > maxH) { h = maxH; w = h * vb.width / vb.height; }
       need(h + 4);
-      await doc.svg(prepSvg(svg, w), { x: M + (W - w) / 2, y, width: w, height: h });
+      await doc.svg(prepSvg(svg, w, { family: FF }), { x: M + (W - w) / 2, y, width: w, height: h });
       y += h + 2;
     };
     const out = root.querySelector('.out');
@@ -1407,9 +1852,9 @@ async function exportPdf(tool, root, btn) {
       if (cl.contains('tablewrap')) {
         doc.autoTable({
           html: el.querySelector('table'), startY: y, margin: { left: M, right: M },
-          styles: { font: 'helvetica', fontSize: 8, cellPadding: 1.2, textColor: [31, 41, 51], lineColor: [217, 211, 199], lineWidth: 0.1 },
+          styles: { font: FF, fontSize: 8, cellPadding: 1.2, textColor: [31, 41, 51], lineColor: [217, 211, 199], lineWidth: 0.1 },
           headStyles: { fillColor: [241, 236, 226], textColor: [31, 41, 51], fontStyle: 'bold' },
-          didParseCell: d => { d.cell.text = d.cell.text.map(pdfTxt); },
+          didParseCell: d => { d.cell.text = d.cell.text.map(tx); },
         });
         y = doc.lastAutoTable.finalY + 3;
         continue;
@@ -1426,7 +1871,7 @@ async function exportPdf(tool, root, btn) {
       if (cl.contains('tpls')) {
         for (const tile of el.querySelectorAll('svg.tile')) {
           doc.addPage();
-          await doc.svg(prepSvg(tile, 180), { x: 15, y: 12, width: 180, height: 255 });
+          await doc.svg(prepSvg(tile, 180, { family: FF }), { x: 15, y: 12, width: 180, height: 255 });
         }
         y = PH;
         continue;
@@ -1434,7 +1879,7 @@ async function exportPdf(tool, root, btn) {
     }
     // Seitenzahlen
     const n = doc.getNumberOfPages();
-    for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(140); doc.text(pdfTxt(`${tool.title} · Seite ${i}/${n}`), 210 - M, 292, { align: 'right' }); }
+    for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont(FF, 'normal'); doc.setFontSize(7.5); doc.setTextColor(140); doc.text(tx(`${tool.title} · Seite ${i}/${n}`), 210 - M, 292, { align: 'right' }); }
 
     const name = `Bauplan-${tool.title.replace(/[^\wäöüÄÖÜß-]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`;
     const blob = doc.output('blob');
@@ -1499,8 +1944,9 @@ function buildForm(tool, el) {
         h += `<button class="btn sec small" data-add="1">+ Modul</button>`;
         return;
       }
-      h += `<div class="field"><label for="${tool.id}-${f.id}">${esc(f.label)}${f.help ? `<small>${esc(f.help)}</small>` : ''}</label><div class="ctl">`;
-      if (f.type === 'select') h += `<select id="${tool.id}-${f.id}" data-f="${f.id}">${f.options.map(o => `<option value="${o[0]}"${String(v[f.id]) === String(o[0]) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>`;
+      h += `<div class="field${f.type === 'text' ? ' wide' : ''}"><label for="${tool.id}-${f.id}">${esc(f.label)}${f.help ? `<small>${esc(f.help)}</small>` : ''}</label><div class="ctl">`;
+      if (f.type === 'text') h += `<input id="${tool.id}-${f.id}" type="text" data-f="${f.id}" value="${esc(v[f.id])}" style="width:100%;font-size:16px;padding:7px 8px;border:1px solid var(--line);border-radius:8px">`;
+      else if (f.type === 'select') h += `<select id="${tool.id}-${f.id}" data-f="${f.id}">${f.options.map(o => `<option value="${o[0]}"${String(v[f.id]) === String(o[0]) ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>`;
       else h += `<input id="${tool.id}-${f.id}" type="number" inputmode="decimal" step="any" data-f="${f.id}" value="${v[f.id]}"><span class="unit">${esc(f.unit || '')}</span>`;
       h += `</div></div>`;
     });
@@ -1544,7 +1990,7 @@ function mountTool(tool) {
     if (el.closest('.extra')) return;
     if (el.dataset.f) {
       const f = tool.fields.find(x => x.id === el.dataset.f);
-      const val = f.type === 'select' ? el.value : el.value.replace(',', '.');
+      const val = f.type === 'select' || f.type === 'text' ? el.value : el.value.replace(',', '.');
       setField(f.id, val);
       if (f.onchange) { f.onchange(val, setField); }
       if (f.type === 'select') { rebuild(); }
@@ -1565,7 +2011,7 @@ function mountTool(tool) {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.closest('.extra')) { if (tool.onExtra) { tool.onExtra(st(), b, 'click'); save(); refreshExtra(true); recalc(tool, root); } return; }
-    if (b.dataset.pdf) { exportPdf(tool, root, b); return; }
+    if (b.dataset.pdf) { (tool.printPdf || exportPdf)(tool, root, b); return; }
     if (b.dataset.print) { window.print(); return; }
     if (b.dataset.reset) { if (confirm('Alle Eingaben dieses Tools auf Standard zurücksetzen?')) { state[tool.id] = {}; save(); rebuild(); recalc(tool, root); } return; }
     if (b.dataset.add) { const mods = values(tool).modules; mods.push({ type: 'ablage', qty: 1, ...MODS.ablage.def }); st().modules = mods; }
