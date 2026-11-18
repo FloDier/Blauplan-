@@ -116,6 +116,17 @@ figure.drw figcaption { font-size: 12.5px; color: var(--muted); margin-top: 4px;
 .modhead { font-size: 11px; color: var(--muted); text-transform: uppercase; }
 .modrow button { border: 0; background: #eee5d6; border-radius: 7px; padding: 6px 0; cursor: pointer; }
 .printhead { display: none; }
+.rowed { border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-bottom: 10px; background: #fcfaf5; }
+.rowed h4 { margin: 0 0 4px; font-size: 14px; display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.rowed .stat { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.rowed .stat.over { color: var(--err-ink); font-weight: 700; }
+.fr { display: grid; grid-template-columns: 18px minmax(0, 1fr) 62px 48px 28px; gap: 4px; align-items: center; margin-bottom: 4px; }
+.fr span.nr { font-size: 12px; color: var(--muted); }
+.fr select, .fr input { width: 100%; min-width: 0; font-size: 15px; padding: 5px 3px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+.fr input:disabled { background: #eee; color: #888; }
+.fr button, .rowed h4 button, .rowed .addrow button { border: 0; background: #eee5d6; border-radius: 7px; padding: 5px 8px; cursor: pointer; font-size: 13px; }
+.rowed .addrow { display: flex; gap: 6px; margin-top: 4px; }
+.frh { font-size: 10.5px; color: var(--muted); text-transform: uppercase; }
 .note { font-size: 12.5px; color: var(--muted); }
 .actions { display: grid; gap: 8px; margin-top: 10px; }
 
@@ -336,298 +347,487 @@ function renderPlan(plan) {
 }
 
 /* =====================================================================
-   TOOL 1: Boxenregal für IKEA SAMLA (Kantholz-Rahmen + Dachlatten-Schienen)
-   System nach „das boxenregal – Bauplan v0.1“:
-   - 2 Rahmen (vorne/hinten) aus Balken + Pfosten, Kantholz 78 × 58
-   - Schienen aus Dachlatte, so lang wie die Regaltiefe, links und rechts an die Pfosten
-   - Boxen hängen mit dem Rand auf den Schienen, 39-cm-Seite quer
-   - Höhen über Abstandsplatten A–D, Pfostenabstand über Abstandsholz
+   TOOL 1: Regal-Planer (Kantholz-Rahmen + Dachlatten)
+   System nach „das boxenregal – Bauplan v0.1“, erweitert um
+   normale Böden, freie Stapelfächer, Schrank, Lücken und eine Insel.
+   Ablauf: Form → Maße → Vorlage → Fächer je Wand → Material → Bauplan
    ===================================================================== */
-const FACH_TYPES = {
-  G: { name: 'G (3× 65 l, Rest 45 l)', n65: 3, n22: 0 },
-  M: { name: 'M (1× 65 l, Rest 45 l)', n65: 1, n22: 0 },
-  K: { name: 'K (45 l unten, 4 Ebenen 2× 22 l)', n65: 0, n22: 4 },
+const SAMLA_TYPES = {
+  G: { name: 'G (3× 65 + 45)', n65: 3, n22: 0 },
+  M: { name: 'M (1× 65 + 45)', n65: 1, n22: 0 },
+  K: { name: 'K (45 + 2× 22)', n65: 0, n22: 4 },
   A45: { name: 'nur 45 l', n65: 0, n22: 0 },
-  A22: { name: 'nur 2× 22 l', n65: 0, n22: 99 },
   A65: { name: 'nur 65 l', n65: 99, n22: 0 },
+  A22: { name: 'nur 2× 22 l', n65: 0, n22: 99 },
 };
-const PATTERNS = {
-  mix: { name: 'gemischt: G M K K …', seq: ['G', 'M', 'K', 'K'] },
-  gmk: { name: 'gemischt: G M K …', seq: ['G', 'M', 'K'] },
-  A45: { name: 'alle Fächer nur 45 l', seq: ['A45'] },
-  A65: { name: 'alle Fächer nur 65 l', seq: ['A65'] },
-  A22: { name: 'alle Fächer nur 22 l', seq: ['A22'] },
-  G: { name: 'alle Fächer G', seq: ['G'] },
-  M: { name: 'alle Fächer M', seq: ['M'] },
-  K: { name: 'alle Fächer K', seq: ['K'] },
-};
+const FACH_OPTS = [
+  ...Object.entries(SAMLA_TYPES).map(([k, t]) => ['S:' + k, 'SAMLA ' + t.name]),
+  ['boeden', 'Böden'], ['frei', 'Frei / Stapelfläche'], ['schrank', 'Schrank mit Türen'], ['luecke', 'Lücke (Heizkörper, Tür …)'],
+];
+const SAMLA_SEQ = ['G', 'M', 'K', 'K'];
 const BOXLBL = { '65': '65 l', '45': '45 l', '22': '2× 22 l' };
 const cmS = x => (Math.round(x) / 10).toFixed(1).replace('.', ',');
 const isForm = (...f) => v => f.includes(v.form);
+const ROWDEF = {
+  back: 'Rückwand', left: 'Linke Wand', right: 'Rechte Wand', insel: 'Insel',
+};
 
-const toolBoxen = {
-  id: 'boxen',
-  title: 'SAMLA-Boxenregal',
+// ---- Geometrie-Grundlagen ----
+function regalGeo(v) {
+  const kb = v.kb, sgap = v.clear + 2 * v.lt;
+  return {
+    kb, sgap, raster: sgap + kb, postLen: v.H - 2 * kb, maxTop: v.H - kb - v.head,
+    depth: v.T + v.wallGap,
+    plates: { A: v.r28 - 38, B: v.r28 - 1, C: v.r65 - 38, D: v.r65 - 1 },
+  };
+}
+const fachW = (f, G) => f.t === 'samla' ? G.sgap : Math.max(100, f.w || 0);
+// Fächer in Module (Rahmen) aufteilen: Balken ≤ Lagerlänge, Lücken trennen
+function splitModules(items, G, stock) {
+  const parts = [];
+  let cur = null;
+  items.forEach((f, i) => {
+    if (f.t === 'luecke') { cur = null; parts.push({ gap: true, w: f.w, f, i }); return; }
+    const w = fachW(f, G);
+    if (!cur || cur.len + w + G.kb > stock) { cur = { len: G.kb, items: [] }; parts.push(cur); }
+    cur.items.push({ f, w, i }); cur.len += w + G.kb;
+  });
+  return parts;
+}
+const rowLen = (items, G, stock) => sum(splitModules(items, G, stock).map(p => p.gap ? p.w : p.len));
+
+// SAMLA-Ebenen eines Fachs
+function samlaLevels(type, v, G) {
+  const ft = SAMLA_TYPES[type], lv = [];
+  let prev = G.kb;
+  const add = box => {
+    const big = box === '65', first = !lv.length;
+    const plate = big ? (first ? 'C' : 'D') : (first ? 'A' : 'B');
+    const top = prev + G.plates[plate] + v.lh;
+    if (top > G.maxTop) return false;
+    lv.push({ box, plate, top }); prev = top; return true;
+  };
+  for (let i = 0; i < ft.n65; i++) if (!add('65')) break;
+  while (add('45'));
+  let k = ft.n22;
+  for (let i = lv.length - 1; i >= 0 && k > 0; i--) if (lv[i].box === '45') { lv[i].box = '22'; k--; }
+  return lv;
+}
+// Böden: gleichmäßig zwischen unterem und oberem Balken (Oberkante Boden)
+function boardLevels(n, G) {
+  const out = [];
+  for (let i = 1; i <= n; i++) out.push(G.kb + i * G.postLen / (n + 1));
+  return out;
+}
+
+// Verfügbare Längen je Reihe
+function regalRows(v) {
+  const G = regalGeo(v);
+  const rows = [];
+  const front = v.frontFree;
+  if (v.form === 'I') rows.push({ key: 'back', usable: v.Wb - 30 });
+  if (v.form === 'L') rows.push({ key: 'back', usable: v.Wb - G.depth - 30 }, { key: 'left', usable: v.D - G.depth - front });
+  if (v.form === 'U') rows.push({ key: 'back', usable: v.Wb - 2 * G.depth }, { key: 'left', usable: v.D - G.depth - front }, { key: 'right', usable: v.D - G.depth - front });
+  let insel = null;
+  if (v.insel !== 'none') {
+    const iDepth = v.insel === 'dbl' ? 2 * v.T + 20 : v.T;
+    const x0 = v.form === 'I' ? 0 : G.depth, x1 = v.form === 'U' ? v.Wb - G.depth : v.Wb;
+    const mid = x1 - x0;
+    const gang = (mid - iDepth) / 2;
+    const y0 = (v.form === 'I' ? G.depth : G.depth) + v.gang;
+    const len = v.inselL > 0 ? v.inselL : v.D - y0 - v.gang;
+    insel = { iDepth, x0, x1, gang, y0, len, cx: (x0 + x1) / 2 };
+    rows.push({ key: 'insel', usable: len, mult: v.insel === 'dbl' ? 2 : 1 });
+  }
+  return { G, rows, insel };
+}
+
+// Automatische Belegung
+function autoFill(usable, v, G) {
+  const fits = items => rowLen(items, G, v.stock) <= usable;
+  const samlaFill = (base, limit) => {
+    const items = base.slice();
+    let k = 0;
+    while (true) {
+      const nx = items.concat([{ t: 'samla', s: SAMLA_SEQ[k % SAMLA_SEQ.length] }]);
+      if (rowLen(nx, G, v.stock) > limit) break;
+      items.push(nx[nx.length - 1]); k++;
+    }
+    return items;
+  };
+  if (v.vorlage === 'boxen') return samlaFill([], usable);
+  if (v.vorlage === 'boeden') {
+    for (let n = 1; n < 30; n++) {
+      const w = Math.floor(((usable - G.kb) / n - G.kb) / 10) * 10;
+      if (w <= 800) { const it = Array.from({ length: n }, () => ({ t: 'boeden', w: Math.max(350, w), n: 4 })); return fits(it) ? it : it.slice(0, -1); }
+    }
+    return [];
+  }
+  // Mix: ein Bodenfach, Rest SAMLA, übrige Länge geht in das Bodenfach (max. 100 cm)
+  const s = samlaFill([], usable - 600 - G.kb);
+  if (!s.length) return autoFill(usable, { ...v, vorlage: 'boeden' }, G);
+  const items = [{ t: 'boeden', w: 600, n: 4 }, ...s];
+  if (!fits(items)) return s;
+  // Bodenfach so weit verbreitern, wie es passt (max. 80 cm, sonst biegt OSB durch)
+  while (items[0].w < 800) { items[0].w += 10; if (!fits(items)) { items[0].w -= 10; break; } }
+  return items;
+}
+function resolveRows(v, st) {
+  const R = regalRows(v);
+  const saved = (st && st.rows) || {};
+  R.rows.forEach(r => {
+    const s = saved[r.key];
+    r.auto = !s || s.auto !== false;
+    r.items = r.auto ? autoFill(r.usable, v, R.G) : s.items.map(x => ({ ...x }));
+    r.len = rowLen(r.items, R.G, v.stock);
+  });
+  return R;
+}
+
+const toolRegal = {
+  id: 'regal',
+  title: 'Regal',
   unit: 'cm',
+  extraAfter: '3 · Vorlage',
   fields: [
-    { g: 'Raum', id: 'form', label: 'Regalform', type: 'select', def: 'I', options: [['I', 'I – eine Wand'], ['L', 'L – Rückwand + linke Wand'], ['U', 'U – drei Wände']] },
-    { g: 'Raum', id: 'Wb', label: 'Rückwand Länge', def: 2050, unit: 'mm' },
-    { g: 'Raum', id: 'Wl', label: 'Linke Wand Länge', def: 2000, unit: 'mm', show: isForm('L', 'U') },
-    { g: 'Raum', id: 'Wr', label: 'Rechte Wand Länge', def: 2000, unit: 'mm', show: isForm('U') },
-    { g: 'Raum', id: 'H', label: 'Regalhöhe', def: 2200, unit: 'mm', help: 'Raumhöhe minus Luft zum Aufrichten (ca. 10 cm)' },
-    { g: 'Belegung', id: 'pattern', label: 'Fächer belegen', type: 'select', def: 'mix', options: Object.entries(PATTERNS).map(([k, p]) => [k, p.name]) },
+    { g: '1 · Form', id: 'form', label: 'Grundform', type: 'select', def: 'U', options: [['I', 'I – eine Wand'], ['L', 'L – Rückwand + linke Wand'], ['U', 'U – drei Wände']] },
+    { g: '1 · Form', id: 'insel', label: 'Insel (freistehend)', type: 'select', def: 'none', options: [['none', 'keine'], ['single', 'einseitig'], ['dbl', 'doppelseitig (Rücken an Rücken)']] },
+    { g: '2 · Raum & Maße', id: 'Wb', label: 'Raumbreite (Rückwand)', def: 3800, unit: 'mm' },
+    { g: '2 · Raum & Maße', id: 'D', label: 'Raumtiefe (Seitenwände)', def: 3300, unit: 'mm' },
+    { g: '2 · Raum & Maße', id: 'frontFree', label: 'Vorne an den Seiten freihalten', def: 0, unit: 'mm', help: 'z. B. Tür, Laufweg', show: isForm('L', 'U') },
+    { g: '2 · Raum & Maße', id: 'H', label: 'Regalhöhe', def: 2200, unit: 'mm', help: 'Raumhöhe minus ca. 10 cm zum Aufrichten' },
+    { g: '2 · Raum & Maße', id: 'T', label: 'Regaltiefe', def: 600, unit: 'mm' },
+    { g: '2 · Raum & Maße', id: 'gang', label: 'Mindest-Gangbreite', def: 650, unit: 'mm' },
+    { g: '2 · Raum & Maße', id: 'inselL', label: 'Insel-Länge', def: 0, unit: 'mm', help: '0 = automatisch', show: v => v.insel !== 'none' },
+    { g: '2 · Raum & Maße', id: 'inselH', label: 'Insel-Höhe', def: 0, unit: 'mm', help: '0 = automatisch (kippsicher)', show: v => v.insel !== 'none' },
+    { g: '3 · Vorlage', id: 'vorlage', label: 'Fächer automatisch füllen mit', type: 'select', def: 'mix', options: [['boxen', 'nur SAMLA-Boxen'], ['boeden', 'nur Böden'], ['mix', 'Mix: Böden + Boxen']] },
     { g: 'Boxen (selbst messen!)', id: 'r65', label: 'Randmaß r 65 l', def: 411, unit: 'mm', help: 'Boxboden bis Unterkante Rand' },
     { g: 'Boxen (selbst messen!)', id: 'r28', label: 'Randmaß r 45/22 l', def: 271, unit: 'mm' },
-    { g: 'Boxen (selbst messen!)', id: 'clear', label: 'Lichte Weite Schienen', def: 365, unit: 'mm', help: 'Box-Rand 390 muss sicher aufliegen, Körper muss durchpassen' },
-    { g: 'Holz', id: 'T', label: 'Regaltiefe = Schienenlänge', def: 600, unit: 'mm' },
-    { g: 'Holz', id: 'kb', label: 'Kantholz sichtbare Breite', def: 58, unit: 'mm', help: 'Kantholz 78 × 58, 58er-Seite nach vorne' },
+    { g: 'Boxen (selbst messen!)', id: 'clear', label: 'Lichte Weite Schienen', def: 365, unit: 'mm' },
+    { g: 'Holz', id: 'kb', label: 'Kantholz sichtbare Breite', def: 58, unit: 'mm', help: 'Kantholz 78 × 58' },
     { g: 'Holz', id: 'kt', label: 'Kantholz Tiefe', def: 78, unit: 'mm' },
     { g: 'Holz', id: 'lh', label: 'Dachlatte Höhe', def: 50, unit: 'mm' },
     { g: 'Holz', id: 'lt', label: 'Dachlatte Stärke', def: 30, unit: 'mm' },
+    { g: 'Holz', id: 'osb', label: 'OSB Böden', def: 18, unit: 'mm' },
+    { g: 'Holz', id: 'osb2', label: 'OSB Schrankwände/Türen', def: 12, unit: 'mm' },
     { g: 'Holz', id: 'stock', label: 'Lagerlänge Holz', def: 2500, unit: 'mm' },
     { g: 'Holz', id: 'kerf', label: 'Schnittbreite Säge', def: 3, unit: 'mm' },
     { g: 'Abstände', id: 'wallGap', label: 'Wandabstand', def: 20, unit: 'mm' },
     { g: 'Abstände', id: 'head', label: 'Mind. Luft über oberster Schiene', def: 60, unit: 'mm' },
     { g: 'Preise (ca.)', id: 'pK', label: 'Kantholz 2,5 m', def: 10.5, unit: '€' },
     { g: 'Preise (ca.)', id: 'pL', label: 'Dachlatte 2,5 m', def: 2.1, unit: '€' },
+    { g: 'Preise (ca.)', id: 'pO', label: 'OSB-Platte 250 × 125', def: 28, unit: '€' },
   ],
-  compute(v) {
-    const msgs = [], plan = { title: 'SAMLA-Boxenregal', msgs, unit: 'cm' };
-    const kb = v.kb, gap = v.clear + 2 * v.lt, raster = gap + kb;
-    const postLen = v.H - 2 * kb, maxTop = v.H - kb - v.head;
-    const depth = v.T + v.wallGap;                       // Platz von der Wand bis Vorderkante
-    if (v.clear >= 390 - 10) msgs.push(['err', `Lichte Weite ${cmS(v.clear)} cm ist zu groß – der Box-Rand (39 cm) liegt kaum noch auf. Üblich: 36,5 cm.`]);
-    if (v.T < 570) msgs.push(['warn', `Regaltiefe ${cmS(v.T)} cm ist kürzer als die 65/45-l-Box (57 cm).`]);
-    if (v.T < 560) msgs.push(['warn', 'Zwei 22-l-Boxen (2 × 28 cm) passen nicht hintereinander.']);
 
-    // Abstandsplatten: A/B für 28 cm hohe Boxen, C/D für 65 l
-    const plates = { A: v.r28 - 38, B: v.r28 - 1, C: v.r65 - 38, D: v.r65 - 1 };
-    const fachCache = {};
-    const fachLevels = type => {
-      if (fachCache[type]) return fachCache[type];
-      const ft = FACH_TYPES[type], lv = [];
-      let prev = kb;
-      const add = box => {
-        const big = box === '65', first = !lv.length;
-        const plate = big ? (first ? 'C' : 'D') : (first ? 'A' : 'B');
-        const top = prev + plates[plate] + v.lh;
-        if (top > maxTop) return false;
-        lv.push({ box, plate, top }); prev = top; return true;
-      };
-      for (let i = 0; i < ft.n65; i++) if (!add('65')) break;
-      while (add('45'));
-      let k = ft.n22;
-      for (let i = lv.length - 1; i >= 0 && k > 0; i--) if (lv[i].box === '45') { lv[i].box = '22'; k--; }
-      return (fachCache[type] = lv);
-    };
-
-    // Reihen nach Regalform
-    const rows = [];
-    if (v.form === 'I') rows.push({ name: 'Rückwand', usable: v.Wb - 30 });
-    if (v.form === 'L') rows.push({ name: 'Rückwand', usable: v.Wb - depth - 30 }, { name: 'Linke Wand', usable: v.Wl - depth - 30 });
-    if (v.form === 'U') {
-      rows.push({ name: 'Rückwand', usable: v.Wb - 2 * depth }, { name: 'Linke Wand', usable: v.Wl - depth - 30 }, { name: 'Rechte Wand', usable: v.Wr - depth - 30 });
-      const gang = v.Wb - 2 * depth;
-      if (gang < 650) msgs.push(['err', `Gang zwischen den Seitenreihen nur ${cmS(gang)} cm – mindestens 65 cm nötig, um Boxen herauszuziehen.`]);
-    }
-    const seq = PATTERNS[v.pattern].seq;
-    const maxF = Math.max(1, Math.floor((v.stock - kb) / raster));
-    const fitRow = usable => {
-      for (let n = 60; n >= 1; n--) {
-        const m = Math.ceil(n / Math.min(5, maxF));
-        if (m * kb + n * raster <= usable) {
-          const base = Math.floor(n / m), extra = n % m;
-          return Array.from({ length: m }, (_, i) => base + (i < extra ? 1 : 0));
-        }
-      }
-      return [];
-    };
-    const modules = [];
-    rows.forEach(r => {
-      r.mods = fitRow(r.usable);
-      let f = 0;
-      r.mods.forEach(k => {
-        const types = Array.from({ length: k }, () => seq[f++ % seq.length]);
-        const mod = { row: r.name, k, len: kb + k * raster, types };
-        modules.push(mod);
+  // ---- Fächer-Editor (Schritt 4) ----
+  extra(v, st) {
+    const R = resolveRows(v, st);
+    let h = '<fieldset><legend>4 · Fächer je Wand</legend><p class="note" style="margin:0 0 6px">Automatisch gefüllt – jedes Fach lässt sich ändern. Breite gilt für Böden, Frei, Schrank und Lücke (SAMLA hat feste Breite).</p>';
+    R.rows.forEach(r => {
+      const over = r.len > r.usable + 0.5;
+      h += `<div class="rowed"><h4><span>${ROWDEF[r.key]}${r.mult === 2 ? ' (beide Seiten gleich)' : ''}</span>` +
+        `<button data-xbtn="auto" data-row="${r.key}">${r.auto ? 'automatisch ✓' : 'neu füllen'}</button></h4>` +
+        `<div class="stat${over ? ' over' : ''}">Platz ${cmS(r.usable)} cm · belegt ${cmS(r.len)} cm${over ? ' – zu lang!' : ` · frei ${cmS(r.usable - r.len)} cm`}</div>`;
+      h += '<div class="fr frh"><span></span><span>Fach</span><span>Breite mm</span><span>Böden</span><span></span></div>';
+      r.items.forEach((f, i) => {
+        const val = f.t === 'samla' ? 'S:' + f.s : f.t;
+        const hasN = f.t === 'boeden' || f.t === 'schrank';
+        h += `<div class="fr"><span class="nr">${i + 1}</span>` +
+          `<select data-x="type" data-row="${r.key}" data-i="${i}">${FACH_OPTS.map(o => `<option value="${o[0]}"${o[0] === val ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>` +
+          `<input type="number" inputmode="numeric" data-x="w" data-row="${r.key}" data-i="${i}" value="${f.t === 'samla' ? R.G.sgap : f.w}"${f.t === 'samla' ? ' disabled' : ''}>` +
+          `<input type="number" inputmode="numeric" data-x="n" data-row="${r.key}" data-i="${i}" value="${hasN ? f.n : ''}"${hasN ? '' : ' disabled'}>` +
+          `<button data-xbtn="del" data-row="${r.key}" data-i="${i}">✕</button></div>`;
       });
-      r.len = sum(r.mods.map(k => kb + k * raster));
-      if (!r.mods.length) msgs.push(['warn', `${r.name}: zu kurz für ein Fach (mindestens ${cmS(kb + raster + 30)} cm nutzbare Länge nötig).`]);
-      else if (r.usable - r.len > raster * 0.6) msgs.push(['info', `${r.name}: ${cmS(r.usable - r.len)} cm bleiben frei. Für ein Fach mehr fehlen ${cmS(raster - (r.usable - r.len) + (r.mods.length < Math.ceil((sum(r.mods) + 1) / 5) ? kb : 0))} cm.`]);
+      h += `<div class="addrow"><button data-xbtn="add" data-row="${r.key}" data-t="S:G">+ SAMLA</button><button data-xbtn="add" data-row="${r.key}" data-t="boeden">+ Böden</button><button data-xbtn="add" data-row="${r.key}" data-t="frei">+ Frei</button><button data-xbtn="add" data-row="${r.key}" data-t="schrank">+ Schrank</button></div></div>`;
     });
-    if (!modules.length) { msgs.push(['err', 'Kein Modul passt an die Wand.']); plan.fatal = true; return plan; }
-    const types0 = [...new Set(modules.flatMap(m => m.types))];
-    types0.forEach(t => { if (!fachLevels(t).length) msgs.push(['err', `Fach ${t}: Regalhöhe zu gering für eine Box.`]); });
+    return h + '</fieldset>';
+  },
+  onExtra(st, el, kind) {
+    const v = values(this);
+    const R = resolveRows(v, st);
+    const key = el.dataset.row, row = R.rows.find(r => r.key === key);
+    if (!row) return;
+    let items = row.items;
+    const i = +el.dataset.i;
+    const mk = t => t.startsWith('S:') ? { t: 'samla', s: t.slice(2) } : { t, w: t === 'luecke' ? 600 : t === 'frei' ? 800 : t === 'schrank' ? 900 : 800, n: t === 'schrank' ? 2 : 4 };
+    if (kind === 'click') {
+      const a = el.dataset.xbtn;
+      if (a === 'auto') { st.rows = { ...(st.rows || {}), [key]: { auto: true } }; return; }
+      if (a === 'del') items.splice(i, 1);
+      if (a === 'add') items.push(mk(el.dataset.t));
+    } else {
+      const k = el.dataset.x;
+      if (k === 'type') { const old = items[i]; items[i] = mk(el.value); if (old.w && items[i].t !== 'samla') items[i].w = old.w; }
+      if (k === 'w') items[i].w = Math.max(100, Number(el.value) || 0);
+      if (k === 'n') items[i].n = clamp(Number(el.value) | 0, 0, 12);
+    }
+    st.rows = { ...(st.rows || {}), [key]: { auto: false, items } };
+  },
 
-    // Summen
-    let nRails = 0, nPosts = 0, nBalken = 0, n6x120 = 0, nPlate = 0, lochband = 0, n4x35 = 0;
-    const boxes = { '65': 0, '45': 0, '22': 0 }, kantItems = [], railItems = [];
-    modules.forEach(m => {
-      nBalken += 4; nPosts += 2 * (m.k + 1); n6x120 += 8 * (m.k + 1);
-      for (let i = 0; i < 4; i++) kantItems.push({ len: m.len, label: 'A' });
-      for (let i = 0; i < 2 * (m.k + 1); i++) kantItems.push({ len: postLen, label: 'B' });
-      lochband += 2 * Math.hypot(m.len, v.H); n4x35 += 20;
-      nPlate += 2 * (Math.ceil(m.len / 1000) + 1);
-      m.types.forEach(t => fachLevels(t).forEach(l => { nRails += 2; boxes[l.box] += l.box === '22' ? 2 : 1; }));
+  compute(v) {
+    const msgs = [], plan = { title: 'Regal – Bauplan', msgs, unit: 'cm' };
+    const R = resolveRows(v, state[this.id]);
+    const G = R.G, kb = G.kb;
+    if (v.clear >= 380) msgs.push(['err', `Lichte Weite ${cmS(v.clear)} cm ist zu groß – der Box-Rand (39 cm) liegt kaum noch auf. Üblich: 36,5 cm.`]);
+    if (v.form === 'U') {
+      const g = v.Wb - 2 * G.depth;
+      if (g < v.gang) msgs.push(['err', `Zwischen den Seitenreihen bleiben nur ${cmS(g)} cm.`]);
+    }
+    // Insel prüfen
+    let inselH = v.H;
+    if (R.insel) {
+      const I = R.insel;
+      if (I.gang < v.gang) msgs.push(['err', `Insel: links/rechts nur ${cmS(I.gang)} cm Gang (mind. ${cmS(v.gang)}). Insel einseitig bauen oder Raum breiter.`]);
+      else msgs.push(['info', `Insel: ${cmS(I.gang)} cm Gang links und rechts, ${cmS(v.gang)} cm Abstand nach hinten.`]);
+      if (I.len < kb + G.raster) msgs.push(['err', 'Insel: Raum zu kurz – Insel-Länge reicht für kein Fach.']);
+      const base = v.insel === 'dbl' ? I.iDepth : v.T;
+      const safeH = Math.floor(base * 3 / 10) * 10;
+      inselH = v.inselH > 0 ? v.inselH : Math.min(v.H, safeH);
+      if (inselH > base * 3) msgs.push(['warn', `Insel ${cmS(inselH)} cm hoch bei ${cmS(base)} cm Tiefe – Kippgefahr! Faustregel: höchstens 3 × Tiefe (${cmS(base * 3)} cm), sonst am Boden verschrauben.`]);
+      else msgs.push(['info', `Insel-Höhe ${cmS(inselH)} cm (≤ 3 × Tiefe). Trotzdem mit Winkeln am Boden verschrauben.`]);
+    }
+    const geoFor = key => key === 'insel' && inselH !== v.H ? regalGeo({ ...v, H: inselH }) : G;
+
+    // Module bilden
+    const mods = [], gaps = [];
+    R.rows.forEach(r => {
+      if (r.len > r.usable + 0.5) msgs.push(['err', `${ROWDEF[r.key]}: Fächer sind ${cmS(r.len - r.usable)} cm zu lang für den Platz.`]);
+      if (!r.items.length) msgs.push(['warn', `${ROWDEF[r.key]}: keine Fächer.`]);
+      const g = geoFor(r.key);
+      r.parts = splitModules(r.items, g, v.stock);
+      r.parts.forEach(p => { if (p.gap) gaps.push(p); else mods.push({ ...p, row: r.key, mult: r.mult || 1, G: g, H: r.key === 'insel' ? inselH : v.H }); });
     });
-    for (let i = 0; i < nRails; i++) railItems.push({ len: v.T, label: 'C' });
-    const kBins = packLengths(kantItems, v.stock, v.kerf), lBins = packLengths(railItems, v.stock, v.kerf);
-    if (kBins.some(b => b.over)) msgs.push(['err', `Ein Teil ist länger als ${cmS(v.stock)} cm – Lagerlänge erhöhen oder weniger Fächer pro Modul.`]);
+    if (!mods.length) { msgs.push(['err', 'Kein Regalmodul geplant.']); plan.fatal = true; return plan; }
+
+    // Mengen
+    const kant = [], latt = [], osbParts = [];
+    const boxes = { '65': 0, '45': 0, '22': 0 };
+    let n6 = 0, nRailScrews = 0, n4x35 = 0, lochband = 0, nPads = 0, nWall = 0, nFloor = 0, nBoardScrews = 0, hinges = 0, handles = 0, nFach = 0;
+    const cnt = { samla: 0, boeden: 0, frei: 0, schrank: 0 };
+    const addN = (arr, n, len, label) => { for (let i = 0; i < n; i++) arr.push({ len, label }); };
+    const osbAdd = (name, qty, l, b, t) => { const e = osbParts.find(p => p.name === name && p.l === l && p.b === b && p.t === t); if (e) e.qty += qty; else osbParts.push({ name, qty, l, b, t, mat: 'OSB' }); };
+    mods.forEach(m => {
+      const g = m.G, k = m.items.length, x = m.mult;
+      addN(kant, 4 * x, m.len, 'A'); addN(kant, 2 * (k + 1) * x, g.postLen, 'B');
+      n6 += 8 * (k + 1) * x; n4x35 += 20 * x; lochband += 2 * Math.hypot(m.len, m.H) * x;
+      nPads += 2 * (Math.ceil(m.len / 1000) + 1) * x;
+      if (m.row === 'insel') nFloor += 4 * x; else nWall += 2;
+      m.items.forEach(({ f, w }) => {
+        nFach += x; cnt[f.t] += x;
+        if (f.t === 'samla') samlaLevels(f.s, v, g).forEach(l => { addN(latt, 2 * x, v.T, 'C'); nRailScrews += 8 * x; boxes[l.box] += (l.box === '22' ? 2 : 1) * x; });
+        if (f.t === 'boeden' || f.t === 'schrank') {
+          addN(latt, 2 * f.n * x, v.T, 'C'); nRailScrews += 8 * f.n * x;
+          osbAdd('Boden', f.n * x, w, v.T, v.osb); nBoardScrews += 4 * f.n * x;
+          if (w > 800) msgs.push(['warn', `Fach ${cmS(w)} cm breit: OSB ${v.osb} mm biegt sich bei Last durch. Mittig eine Latte unterlegen oder Fach schmaler machen (≤ 80 cm).`]);
+        }
+        if (f.t === 'schrank') {
+          osbAdd('Schrank Rückwand', x, g.postLen, w + kb, v.osb2);
+          osbAdd('Schrank Seite', 2 * x, g.postLen, v.T, v.osb2);
+          osbAdd('Schranktür', 2 * x, g.postLen - 6, (w + kb) / 2 - 3, v.osb2);
+          hinges += 6 * x; handles += 2 * x;
+        }
+      });
+    });
+    const kBins = packLengths(kant, v.stock, v.kerf), lBins = packLengths(latt, v.stock, v.kerf);
+    if (kBins.some(b => b.over)) msgs.push(['err', `Ein Teil ist länger als ${cmS(v.stock)} cm.`]);
+    const osbArea = sum(osbParts.map(p => p.qty * p.l * p.b)) / 1e6;
+    const osbSheets = osbArea ? Math.ceil(osbArea * 1.2 / 3.125) : 0;
     const nBox = boxes['65'] + boxes['45'] + boxes['22'];
-    const holz = kBins.length * v.pK + lBins.length * v.pL;
-    const besch = n6x120 * 0.35 + nRails * 4 * 0.06 + Math.ceil(lochband / 1000) * 1.5 + n4x35 * 0.04 + modules.length * 2 * 2.5 + nPlate * 0.3;
-    const nFach = sum(modules.map(m => m.k));
+    const holz = kBins.length * v.pK + lBins.length * v.pL + osbSheets * v.pO;
+    const besch = n6 * 0.35 + nRailScrews * 0.06 + Math.ceil(lochband / 1000) * 1.5 + n4x35 * 0.04 + (nWall + nFloor) * 2.5 + nPads * 0.3 + nBoardScrews * 0.05 + hinges * 3 + handles * 3;
 
     plan.kpis = [
-      ['Boxen gesamt', String(nBox)],
-      ['Boxen', `${boxes['65']}× 65 · ${boxes['45']}× 45 · ${boxes['22']}× 22`],
-      ['Module / Fächer', `${modules.length} / ${nFach}`],
-      ['Höhe × Tiefe', `${cmS(v.H)} × ${cmS(v.T)} cm`],
-      ['Holz', `${kBins.length} Kantholz · ${lBins.length} Latten`],
-      ['Material ca.', `${Math.round(holz + besch)} € (${Math.round((holz + besch) / nFach)} €/Fach)`],
+      ['Fächer', `${nFach} (${[cnt.samla && cnt.samla + ' SAMLA', cnt.boeden && cnt.boeden + ' Böden', cnt.schrank && cnt.schrank + ' Schrank', cnt.frei && cnt.frei + ' frei'].filter(Boolean).join(' · ')})`],
+      ['SAMLA-Boxen', nBox ? `${nBox}: ${boxes['65']}× 65 · ${boxes['45']}× 45 · ${boxes['22']}× 22` : '–'],
+      ['Module (Rahmenpaare)', String(sum(mods.map(m => m.mult)))],
+      ['Holz', `${kBins.length} Kantholz · ${lBins.length} Latten${osbSheets ? ' · ' + osbSheets + ' OSB' : ''}`],
+      ['Material ca.', `${Math.round(holz + besch)} €`],
     ];
 
-    // --- Grundriss ---
-    const roomD = Math.max(v.form === 'I' ? depth + 900 : 0, v.form !== 'I' ? v.Wl : 0, v.form === 'U' ? v.Wr : 0);
-    const fs = Math.max(v.Wb, roomD) / 32;
-    let g = S.rect(0, 0, v.Wb, roomD, 'fill="#fffdf8" stroke="none"');
-    g += S.line(0, 0, v.Wb, 0, 'stroke="#333" stroke-width="6"');
-    if (v.form !== 'I') g += S.line(0, 0, 0, v.Wl, 'stroke="#333" stroke-width="6"');
-    if (v.form === 'U') g += S.line(v.Wb, 0, v.Wb, v.Wr, 'stroke="#333" stroke-width="6"');
-    const drawRow = (r, horiz, x0, y0, dir) => {
+    // ---- Grundriss ----
+    const D = v.D, Wb = v.Wb;
+    const fs = Math.max(Wb, D) / 34;
+    let g = S.rect(0, 0, Wb, D, 'fill="#fffdf8" stroke="#333" stroke-width="3"');
+    const label = (cx, cy, txt, rot) => `<text x="${cx}" y="${cy}" font-size="${fs * 0.6}" text-anchor="middle" ${rot ? `transform="rotate(-90 ${cx} ${cy})"` : ''}>${esc(txt)}</text>`;
+    const fillOf = f => f.t === 'samla' ? '#c9d8ec' : f.t === 'boeden' ? '#f6e3c4' : f.t === 'schrank' ? '#ffffff' : f.t === 'frei' ? '#e8e2d6' : 'none';
+    const short = f => f.t === 'samla' ? f.s.replace('A', '') : f.t === 'boeden' ? 'Böden' : f.t === 'schrank' ? 'Schrank' : f.t === 'frei' ? 'frei' : 'Lücke';
+    const drawPlanRow = (r, horiz, x0, y0, depthT) => {
       let pos = 0;
-      r.mods.forEach(k => {
-        const L = kb + k * raster;
-        const rx = horiz ? x0 + pos : x0, ry = horiz ? y0 : y0 + pos;
-        g += S.rect(rx, ry, horiz ? L : v.T, horiz ? v.T : L, 'class="wood"');
-        for (let j = 0; j <= k; j++) {
-          const p = pos + j * raster;
-          g += horiz ? S.rect(x0 + p, y0, kb, v.kt, 'class="wood2"') + S.rect(x0 + p, y0 + v.T - v.kt, kb, v.kt, 'class="wood2"')
-            : S.rect(x0, y0 + p, v.kt, kb, 'class="wood2"') + S.rect(x0 + v.T - v.kt, y0 + p, v.kt, kb, 'class="wood2"');
+      r.parts.forEach(p => {
+        if (p.gap) {
+          const rx = horiz ? x0 + pos : x0, ry = horiz ? y0 : y0 + pos;
+          g += S.rect(rx, ry, horiz ? p.w : depthT, horiz ? depthT : p.w, 'fill="none" stroke="#9aa3ad" stroke-dasharray="8 6"');
+          g += label(horiz ? rx + p.w / 2 : rx + depthT / 2, horiz ? ry + depthT / 2 : ry + p.w / 2, 'Lücke', !horiz);
+          pos += p.w; return;
         }
-        const cx = horiz ? rx + L / 2 : rx + v.T / 2, cy = horiz ? ry + v.T / 2 : ry + L / 2;
-        g += `<text x="${cx}" y="${cy}" font-size="${fs * 0.75}" text-anchor="middle" ${horiz ? '' : `transform="rotate(-90 ${cx} ${cy})"`}>${k} Fächer · ${cmS(L)}</text>`;
-        pos += L;
+        let q = pos;
+        p.items.forEach(it => {
+          const a = q + kb;
+          const rx = horiz ? x0 + a : x0, ry = horiz ? y0 : y0 + a;
+          g += S.rect(rx, ry, horiz ? it.w : depthT, horiz ? depthT : it.w, `fill="${fillOf(it.f)}" stroke="#8a7a60"`);
+          g += label(horiz ? rx + it.w / 2 : rx + depthT / 2, horiz ? ry + depthT / 2 + fs * 0.2 : ry + it.w / 2, short(it.f), !horiz);
+          q += kb + it.w;
+        });
+        for (let j = 0, z = pos; j <= p.items.length; j++) {
+          g += horiz ? S.rect(x0 + z, y0, kb, depthT, 'class="wood2"') : S.rect(x0, y0 + z, depthT, kb, 'class="wood2"');
+          if (j < p.items.length) z += kb + p.items[j].w;
+        }
+        pos += p.len;
       });
     };
-    const corner = (x, y) => { g += S.rect(x, y, depth, depth, 'fill="#f3f0ea" stroke="#9aa3ad" stroke-dasharray="8 6"'); g += S.text(x + depth / 2, y + depth / 2 + fs * 0.3, 'frei', `font-size="${fs * 0.7}" text-anchor="middle" class="lbl"`); };
-    if (v.form === 'I') drawRow(rows[0], true, 15, v.wallGap);
-    if (v.form === 'L') { corner(0, 0); drawRow(rows[0], true, depth, v.wallGap); drawRow(rows[1], false, v.wallGap, depth); }
+    const rowBy = k => R.rows.find(r => r.key === k);
+    const corner = (x, y) => { g += S.rect(x, y, G.depth, G.depth, 'fill="#f3f0ea" stroke="#9aa3ad" stroke-dasharray="8 6"') + label(x + G.depth / 2, y + G.depth / 2, 'Ecke frei'); };
+    if (v.form === 'I') drawPlanRow(rowBy('back'), true, 15, v.wallGap, v.T);
+    if (v.form === 'L') { corner(0, 0); drawPlanRow(rowBy('back'), true, G.depth, v.wallGap, v.T); drawPlanRow(rowBy('left'), false, v.wallGap, G.depth, v.T); }
     if (v.form === 'U') {
-      corner(0, 0); corner(v.Wb - depth, 0);
-      drawRow(rows[0], true, depth, v.wallGap); drawRow(rows[1], false, v.wallGap, depth); drawRow(rows[2], false, v.Wb - depth, depth);
-      g += dimH(depth, v.Wb - depth, depth + fs * 4, `Gang ${cmS(v.Wb - 2 * depth)}`, fs);
+      corner(0, 0); corner(Wb - G.depth, 0);
+      drawPlanRow(rowBy('back'), true, G.depth, v.wallGap, v.T);
+      drawPlanRow(rowBy('left'), false, v.wallGap, G.depth, v.T);
+      drawPlanRow(rowBy('right'), false, Wb - G.depth, G.depth, v.T);
     }
-    g += dimH(0, v.Wb, -fs * 0.9, `Rückwand ${cmS(v.Wb)}`, fs);
-    if (v.form !== 'I') g += dimV(0, v.Wl, -fs * 0.9, `${cmS(v.Wl)}`, fs);
-    const grund = drawing(-fs * 2.2, -fs * 2.4, v.Wb + fs * 4.4, roomD + fs * 3.4, g, 'Grundriss (Draufsicht, Maße in cm). Dunkel = Pfosten vorne und hinten. In den Ecken bleibt ein Feld frei – dort ließe sich keine Box herausziehen.');
+    if (R.insel) {
+      const I = R.insel;
+      drawPlanRow(rowBy('insel'), false, I.cx - I.iDepth / 2, I.y0, I.iDepth);
+      g += dimH(I.x0, I.cx - I.iDepth / 2, I.y0 + fs * 2, cmS(I.gang), fs * 0.8);
+      g += dimH(I.cx + I.iDepth / 2, I.x1, I.y0 + fs * 2, cmS(I.gang), fs * 0.8);
+      g += dimV(I.y0 - v.gang, I.y0, I.cx, cmS(v.gang), fs * 0.8);
+    }
+    g += dimH(0, Wb, -fs * 0.9, `${cmS(Wb)}`, fs) + dimV(0, D, -fs * 0.9, `${cmS(D)}`, fs);
+    const grund = drawing(-fs * 2.2, -fs * 2.4, Wb + fs * 4.4, D + fs * 3.4, g, 'Grundriss (Maße in cm). Blau = SAMLA · beige = Böden · weiß = Schrank · grau = frei/Stapelfläche · dunkel = Pfosten.');
 
-    // --- Vorderansicht je unterschiedlichem Modul ---
-    const seen = new Set(), fronts = [];
-    modules.forEach(m => {
-      const key = m.types.join('');
-      if (seen.has(key) || fronts.length >= 3) return;
-      seen.add(key);
-      const f2 = Math.max(m.len, v.H) / 30;
-      let h = S.rect(0, 0, m.len, kb, 'class="wood2"') + S.rect(0, v.H - kb, m.len, kb, 'class="wood2"');
-      for (let j = 0; j <= m.k; j++) h += S.rect(j * raster, kb, kb, postLen, 'class="wood2"');
-      m.types.forEach((t, j) => {
-        const x0 = kb + j * raster;
-        fachLevels(t).forEach(l => {
-          const y = v.H - l.top, r = l.box === '65' ? v.r65 : v.r28;
-          h += S.rect(x0 + gap / 2 - 195, y - 15, 390, r + 15, 'class="box"');
-          h += S.rect(x0 + gap / 2 - 195, y - 15, 390, 15, 'class="boxrim"');
-          h += S.rect(x0, y, v.lt, v.lh, 'fill="#111"') + S.rect(x0 + gap - v.lt, y, v.lt, v.lh, 'fill="#111"');
-          h += S.text(x0 + gap / 2, y + r / 2 + f2 * 0.3, BOXLBL[l.box], `font-size="${f2 * 0.7}" text-anchor="middle" class="lbl"`);
+    // ---- Vorderansichten je Reihe ----
+    const fronts = [];
+    R.rows.forEach(r => {
+      const gg = geoFor(r.key), H = r.key === 'insel' ? inselH : v.H;
+      const total = r.len;
+      if (!total) return;
+      const f2 = Math.max(total, H) / 34;
+      let h = '', x = 0;
+      r.parts.forEach(p => {
+        if (p.gap) { h += S.rect(x, 0, p.w, H, 'fill="none" stroke="#9aa3ad" stroke-dasharray="8 6"') + S.text(x + p.w / 2, H / 2, 'Lücke', `font-size="${f2 * 0.7}" text-anchor="middle" class="lbl"`); x += p.w; return; }
+        h += S.rect(x, 0, p.len, gg.kb, 'class="wood2"') + S.rect(x, H - gg.kb, p.len, gg.kb, 'class="wood2"');
+        let q = x;
+        h += S.rect(q, gg.kb, gg.kb, gg.postLen, 'class="wood2"');
+        p.items.forEach(({ f, w }) => {
+          const x0 = q + gg.kb;
+          if (f.t === 'samla') samlaLevels(f.s, v, gg).forEach(l => {
+            const y = H - l.top, rr = l.box === '65' ? v.r65 : v.r28;
+            h += S.rect(x0 + w / 2 - 195, y - 15, 390, rr + 15, 'class="box"') + S.rect(x0 + w / 2 - 195, y - 15, 390, 15, 'class="boxrim"');
+            h += S.rect(x0, y, v.lt, v.lh, 'fill="#111"') + S.rect(x0 + w - v.lt, y, v.lt, v.lh, 'fill="#111"');
+            h += S.text(x0 + w / 2, y + rr / 2 + f2 * 0.3, BOXLBL[l.box], `font-size="${f2 * 0.6}" text-anchor="middle" class="lbl"`);
+          });
+          if (f.t === 'boeden' || f.t === 'schrank') boardLevels(f.n, gg).forEach(top => {
+            const y = H - top;
+            h += S.rect(x0, y, w, v.osb, 'class="wood"') + S.rect(x0, y + v.osb, v.lt, v.lh, 'fill="#111"') + S.rect(x0 + w - v.lt, y + v.osb, v.lt, v.lh, 'fill="#111"');
+          });
+          if (f.t === 'schrank') {
+            h += S.rect(x0 - gg.kb / 2, gg.kb, w + gg.kb, gg.postLen, 'fill="#ffffff" fill-opacity="0.85" stroke="#555"');
+            h += S.line(x0 + w / 2, gg.kb, x0 + w / 2, H - gg.kb, 'stroke="#555"');
+            h += S.text(x0 + w / 2, H / 2, 'Schrank', `font-size="${f2 * 0.7}" text-anchor="middle" class="lbl"`);
+          }
+          if (f.t === 'frei') h += S.text(x0 + w / 2, H / 2, 'frei', `font-size="${f2 * 0.7}" text-anchor="middle" class="lbl"`);
+          h += S.text(x0 + w / 2, H + f2 * 1.1, short(f), `font-size="${f2 * 0.7}" text-anchor="middle" font-weight="700"`);
+          q = x0 + w;
+          h += S.rect(q, gg.kb, gg.kb, gg.postLen, 'class="wood2"');
         });
-        h += S.text(x0 + gap / 2, v.H + f2 * 1.1, t, `font-size="${f2 * 0.9}" text-anchor="middle" font-weight="700"`);
+        h += dimH(x, x + p.len, -f2 * 0.8, cmS(p.len), f2 * 0.7);
+        x += p.len;
       });
-      h += dimH(0, m.len, -f2 * 0.8, `${cmS(m.len)} = ${cmS(kb)} + ${m.k} × ${cmS(raster)}`, f2 * 0.8);
-      h += dimV(0, v.H, -f2 * 0.9, cmS(v.H), f2 * 0.8);
-      h += dimH(kb, kb + gap, v.H + f2 * 2.6, cmS(v.clear) + ' licht', f2 * 0.7);
-      fronts.push(drawing(-f2 * 2.2, -f2 * 2.2, m.len + f2 * 3.4, v.H + f2 * 5.2, h, `Vorderansicht Modul ${m.types.join(' ')} (${m.row}). Schwarz = Schienen, auf ihnen hängen die Boxen mit dem Rand.`));
+      h += dimV(0, H, -f2 * 0.9, cmS(H), f2 * 0.8);
+      fronts.push(drawing(-f2 * 2.2, -f2 * 2.2, total + f2 * 3.4, H + f2 * 3.8, h, `Vorderansicht ${ROWDEF[r.key]}${r.mult === 2 ? ' (beide Seiten)' : ''} – Maße über den Modulen = Balkenlänge`));
     });
-
-    // Fach-Tabelle wie im Plan
-    let ft = '<div class="tablewrap"><table><tr><th>Fach</th><th>Platten von unten</th><th>Schienen-Oberkante ab Boden (cm)</th><th>Boxen</th></tr>';
-    types0.forEach(t => {
-      const lv = fachLevels(t);
-      const cnt = { '65': 0, '45': 0, '22': 0 };
-      lv.forEach(l => { cnt[l.box] += l.box === '22' ? 2 : 1; });
-      ft += `<tr><td><b>${t}</b></td><td>${lv.map(l => l.plate).join('')}</td><td>${lv.map(l => cmS(l.top)).join(' · ')}</td><td>${Object.entries(cnt).filter(e => e[1]).map(e => `${e[1]}× ${e[0]}`).join(' + ')}</td></tr>`;
-    });
-    ft += `</table></div><p class="note">Pfostenabstand (Raster) ${cmS(raster)} · lichte Weite zwischen den Schienen ${cmS(v.clear)} · Regaltiefe ${cmS(v.T)} · Wandabstand ${cmS(v.wallGap)} · Schienen je Fach: ${types0.map(t => `${t} ${2 * fachLevels(t).length}`).join(' · ')}</p>`;
-    let mt = '<div class="tablewrap"><table><tr><th>Modul</th><th>Wand</th><th class="n">Fächer</th><th class="n">Länge</th><th>Belegung</th></tr>';
-    modules.forEach((m, i) => { mt += `<tr><td>${i + 1}</td><td>${esc(m.row)}</td><td class="n">${m.k}</td><td class="n">${cmS(m.len)}</td><td>${m.types.join(' ')}</td></tr>`; });
-    mt += '</table></div>';
     plan.drawings = [grund, ...fronts];
-    plan.afterDrawings = '<h3>Module</h3>' + mt + '<h3>Fächer: Platten &amp; Schienenhöhen</h3>' + ft;
+
+    // Tabellen
+    let tb = '<div class="tablewrap"><table><tr><th>Wand</th><th>#</th><th>Fach</th><th class="n">Breite</th><th>Platten / Höhen (cm)</th><th>Inhalt</th></tr>';
+    R.rows.forEach(r => {
+      const gg = geoFor(r.key);
+      r.items.forEach((f, i) => {
+        let pl = '', inh = '';
+        if (f.t === 'samla') {
+          const lv = samlaLevels(f.s, v, gg);
+          const c = { '65': 0, '45': 0, '22': 0 }; lv.forEach(l => { c[l.box] += l.box === '22' ? 2 : 1; });
+          pl = lv.map(l => l.plate).join('') + ' · ' + lv.map(l => cmS(l.top)).join(' · ');
+          inh = Object.entries(c).filter(e => e[1]).map(e => `${e[1]}× ${e[0]} l`).join(' + ');
+        } else if (f.t === 'boeden' || f.t === 'schrank') {
+          const lv = boardLevels(f.n, gg);
+          pl = lv.map(t => cmS(t)).join(' · ');
+          inh = `${f.n} Böden${f.t === 'schrank' ? ', 2 Türen' : ''}`;
+        } else inh = f.t === 'frei' ? 'Stapelfläche (Kartons)' : 'kein Regal';
+        tb += `<tr><td>${i ? '' : ROWDEF[r.key] + (r.mult === 2 ? ' ×2' : '')}</td><td>${i + 1}</td><td>${esc(short(f))}</td><td class="n">${cmS(fachW(f, gg))}</td><td>${pl}</td><td>${inh}</td></tr>`;
+      });
+    });
+    tb += `</table></div><p class="note">SAMLA: Buchstaben = Abstandsplatten von unten, Zahlen = Schienen-Oberkante ab Boden. Böden: Oberkante Latte ab Boden. Raster SAMLA ${cmS(G.raster)} · lichte Weite ${cmS(v.clear)}.</p>`;
+    plan.afterDrawings = '<h3>Fächer</h3>' + tb;
 
     // Teile
-    const balkenLens = [...new Set(modules.map(m => m.len))];
+    const bal = {};
+    mods.forEach(m => { bal[m.len] = (bal[m.len] || 0) + 4 * m.mult; });
+    const posts = {};
+    mods.forEach(m => { posts[m.G.postLen] = (posts[m.G.postLen] || 0) + 2 * (m.items.length + 1) * m.mult; });
     plan.parts = [
-      ...balkenLens.map(L => ({ name: 'A Balken', qty: 4 * modules.filter(m => m.len === L).length, l: L, b: v.kt, t: kb, mat: 'Kantholz sägerau', note: '2 je Rahmen, flach' })),
-      { name: 'B Pfosten', qty: nPosts, l: postLen, b: v.kt, t: kb, mat: 'Kantholz sägerau', note: 'zwischen den Balken' },
-      { name: 'C Schiene', qty: nRails, l: v.T, b: v.lh, t: v.lt, mat: 'Dachlatte sägerau', note: 'verbindet vorderen und hinteren Pfosten' },
+      ...Object.entries(bal).map(([L, q]) => ({ name: 'A Balken', qty: q, l: +L, b: v.kt, t: kb, mat: 'Kantholz sägerau', note: '2 je Rahmen' })),
+      ...Object.entries(posts).map(([L, q]) => ({ name: 'B Pfosten', qty: q, l: +L, b: v.kt, t: kb, mat: 'Kantholz sägerau' })),
+      { name: 'C Latte (Schiene/Auflage)', qty: latt.length, l: v.T, b: v.lh, t: v.lt, mat: 'Dachlatte sägerau', note: 'vorne + hinten an die Pfosten' },
+      ...osbParts,
     ];
     const sm = (v.stock / 1000).toFixed(1).replace('.', ',');
     plan.cutplan = `<p><b>Kantholz ${sm} m → Balken (A) und Pfosten (B):</b> ${kBins.length} Hölzer.</p>` +
-      stripPlanSvg(kBins, v.stock, Math.max(60, v.kt), 99, 'Zuschnitt Kantholz (Maße in mm). Reste werden zu Abstandshölzern und Schablonen.', { group: true, name: `Kantholz ${sm} m` }) +
-      `<p><b>Dachlatten ${sm} m → Schienen (C):</b> ${lBins.length} Latten.</p>` +
-      stripPlanSvg(lBins, v.stock, v.lh, 99, 'Zuschnitt Dachlatten (Maße in mm). Lattenreste → Endanschläge.', { group: true, name: `Dachlatte ${sm} m` });
-    plan.cutplan +=
-      '';
+      stripPlanSvg(kBins, v.stock, Math.max(60, v.kt), 99, 'Zuschnitt Kantholz (Maße in mm). Reste → Abstandshölzer und Schablonen.', { group: true, name: `Kantholz ${sm} m` }) +
+      `<p><b>Dachlatten ${sm} m → Latten (C):</b> ${lBins.length} Stück.</p>` +
+      stripPlanSvg(lBins, v.stock, v.lh, 99, 'Zuschnitt Dachlatten (Maße in mm).', { group: true, name: `Dachlatte ${sm} m` }) +
+      (osbSheets ? `<p><b>OSB:</b> ca. ${osbArea.toFixed(2).replace('.', ',')} m² → ${osbSheets} Platte(n) 250 × 125 (inkl. 20 % Verschnitt). Im Baumarkt nach Zuschnittliste schneiden lassen.</p>` : '');
+    const boardSpacers = [...new Set(R.rows.flatMap(r => r.items.filter(f => f.t === 'boeden' || f.t === 'schrank').map(f => Math.round(geoFor(r.key).postLen / (f.n + 1) - v.lh))))];
     plan.jigs = [
-      ['Maßlatten mit Endanschlag', [v.T, ...balkenLens, postLen].map(cmS).join(' · ') + ' cm', 'je eine pro Länge – danach wird nicht mehr gemessen, immer am frischen Ende anlegen'],
-      ['Abstandsplatte A', cmS(plates.A) + ' cm', 'erste Schiene für 45/22 l (vom Balken aus)'],
-      ['Abstandsplatte B', cmS(plates.B) + ' cm', 'nächste Schiene für 45/22 l (von der Schiene darunter)'],
-      ['Abstandsplatte C', cmS(plates.C) + ' cm', 'erste Schiene für 65 l (vom Balken aus)'],
-      ['Abstandsplatte D', cmS(plates.D) + ' cm', 'nächste Schiene für 65 l'],
-      ['', '', `Platten aus OSB 15 mm, ca. ${cmS(v.T + 60)} cm breit, innen 2 Leisten ${cmS(v.T)} cm auseinander – sie stehen auf vorderem und hinterem Balken bzw. Schiene`],
-      ['Abstandsholz (2 Stk mit Haltern)', cmS(gap) + ' cm', 'Pfostenabstand beim Rahmenbau – aus Balkenresten'],
-      ['Schraubschablone A/B', '1:1 Papier', 'Vorbohren der Schienen-Enden, siehe unten'],
-      ['Prüfstab', cmS(v.clear) + ' cm', 'muss leicht zwischen den Schienen durchgehen'],
+      ['Maßlatten mit Endanschlag', [v.T, ...Object.keys(bal).map(Number), ...Object.keys(posts).map(Number)].map(cmS).join(' · ') + ' cm', 'je eine pro Länge'],
+      ...(nBox ? [['Abstandsplatten A / B / C / D', ['A', 'B', 'C', 'D'].map(k => cmS(G.plates[k])).join(' / ') + ' cm', 'SAMLA-Schienen: A/C erste Schiene vom Balken, B/D jede weitere (A/B 45 + 22 l, C/D 65 l)']] : []),
+      ...boardSpacers.map(s => ['Abstandsplatte Böden', cmS(s) + ' cm', 'Abstand Latte → nächste Latte bei Bodenfächern']),
+      ['Abstandshölzer SAMLA', cmS(G.sgap) + ' cm', 'Pfostenabstand bei SAMLA-Fächern'],
+      ...[...new Set(R.rows.flatMap(r => r.items.filter(f => f.t !== 'samla' && f.t !== 'luecke').map(f => f.w)))].map(w => ['Abstandsholz', cmS(w) + ' cm', 'Pfostenabstand für Fach dieser Breite']),
+      ['Schraubschablone A/B', '1:1 Papier', 'Latten-Enden vorbohren, siehe unten'],
+      ...(nBox ? [['Prüfstab', cmS(v.clear) + ' cm', 'muss leicht zwischen den Schienen durchgehen']] : []),
     ];
     plan.buy = [
-      [`Kantholz sägerau ${v.kt} × ${kb} mm, ${(v.stock / 1000).toFixed(1).replace('.', ',')} m`, `${kBins.length} Stk`, `A + B · ca. ${Math.round(kBins.length * v.pK)} €`],
-      [`Dachlatte sägerau ${v.lh} × ${v.lt} mm, ${(v.stock / 1000).toFixed(1).replace('.', ',')} m`, `${lBins.length} Stk`, `C · ca. ${Math.round(lBins.length * v.pL)} €`],
-      ['Holzschraube 6 × 120, Teilgewinde, Torx', `${n6x120} Stk`, 'Balken an Pfosten, 2 je Verbindung'],
-      ['Holzschraube 4,5 × 60, Torx', `${nRails * 4} Stk`, 'Schienen, 2 je Ende'],
-      ['Lochband 20 mm verzinkt', `${Math.ceil(lochband / 1000)} m`, 'eine Diagonale je Rahmen'],
-      ['Holzschraube 4 × 35, Torx', `${n4x35} Stk`, 'Lochband'],
-      ['Winkelverbinder 90 × 90 × 40', `${modules.length * 2} Stk`, 'Wandanker, 2 je Modul'],
-      ['Dübel 8 mm + Schraube 6 × 60', `${modules.length * 2} Stk`, 'passend zur Wand'],
-      ['Unterlegplatte Kunststoff 3–5 mm', `${nPlate} Stk`, 'unter die Bodenbalken'],
-      ['OSB 15 mm Reste', '–', 'für die Abstandsplatten A–D'],
-      ['IKEA SAMLA mit Deckel 65 l (57×39×42)', `${boxes['65']} Stk`, ''],
-      ['IKEA SAMLA mit Deckel 45 l (57×39×28)', `${boxes['45']} Stk`, ''],
-      ['IKEA SAMLA mit Deckel 22 l (39×28×28)', `${boxes['22']} Stk`, ''],
-    ].filter(r => !/SAMLA/.test(r[0]) || parseInt(r[1]) > 0);
-    plan.steps = [
-      `<b>Schablonen bauen</b> (einmal, aus Resten): Maßlatten mit Endanschlag für ${[v.T, ...balkenLens, postLen].map(cmS).join(' / ')} cm, Abstandsplatten A–D, 2 Abstandshölzer ${cmS(gap)} cm, Prüfstab ${cmS(v.clear)} cm. Schraubschablone ausdrucken und auf ein Reststück kleben.`,
-      `<b>Zuschneiden:</b> ${nBalken} Balken, ${nPosts} Pfosten à ${cmS(postLen)} cm, ${nRails} Schienen à ${cmS(v.T)} cm – immer mit der Maßlatte am frischen Ende.`,
-      `<b>Rahmen liegend bauen:</b> 2 Balken flach hinlegen, ersten Pfosten bündig mit den Enden. Abstandshölzer einhängen, nächsten Pfosten dagegen, mit 2 × 6 × 120 je Ende verschrauben – bis zum letzten. Der muss wieder bündig sein. Pro Modul 2 Rahmen.`,
-      `<b>Rechtwinklig prüfen, Lochband:</b> Beide Diagonalen messen – gleich lang = rechtwinklig. Eine Diagonale Lochband auf die Rückseite (10 × 4 × 35). Zweiten Rahmen genauso.`,
-      `<b>Aufstellen:</b> Unterlegplatten unterlegen. Hinteren Rahmen mit ${cmS(v.wallGap)} cm Wandabstand aufrichten, vorderen ${cmS(v.T)} cm davor. Zwinge oder Helfer hält ihn.`,
-      `<b>Schienen von unten nach oben:</b> Abstandsplatte laut Tabelle (z. B. Fach G: ${fachLevels('G').map(l => l.plate).join('')}) auf den Balken bzw. die untere Schiene stellen, Schiene oben auflegen, mit der Schraubschablone vorbohren (Ø 3 mm), 2 Schrauben 4,5 × 60 je Ende. Linke Schiene eines Fachs Bohrbild A, rechte B – so treffen sich die Schrauben im Pfosten nicht. Platte herausziehen, nächste. Erst links bis oben, dann rechts.`,
-      `<b>An der Wand sichern:</b> Oben 2 Winkel je Modul in die Wand dübeln. Mehrere Module: benachbarte Pfosten verschrauben${v.form !== 'I' ? ', in den Ecken oben einen Kantholz-Rest über die Stoßkante legen und verschrauben' : ''}.`,
-      `<b>Boxen einhängen:</b> Prüfstab ${cmS(v.clear)} cm zwischen die Schienen halten – er muss leicht durchgehen. Schienen-Oberkanten kurz anschleifen (K80). Schweres nach unten, max. ca. 15 kg je Box.`,
+      [`Kantholz sägerau ${v.kt} × ${kb} mm, ${sm} m`, `${kBins.length} Stk`, `ca. ${Math.round(kBins.length * v.pK)} €`],
+      [`Dachlatte sägerau ${v.lh} × ${v.lt} mm, ${sm} m`, `${lBins.length} Stk`, `ca. ${Math.round(lBins.length * v.pL)} €`],
+      ...(osbSheets ? [[`OSB-Platte ${v.osb} / ${v.osb2} mm`, `${osbSheets} Stk`, `ca. ${Math.round(osbSheets * v.pO)} € – Stärken laut Zuschnittliste`]] : []),
+      ['Holzschraube 6 × 120 Teilgewinde', `${n6} Stk`, 'Balken an Pfosten'],
+      ['Holzschraube 4,5 × 60', `${nRailScrews} Stk`, 'Latten, 2 je Ende'],
+      ...(nBoardScrews ? [['Holzschraube 4 × 30', `${nBoardScrews} Stk`, 'Böden auf Latten']] : []),
+      ['Lochband 20 mm', `${Math.ceil(lochband / 1000)} m`, 'Diagonale je Rahmen'],
+      ['Holzschraube 4 × 35', `${n4x35} Stk`, 'Lochband'],
+      ...(nWall ? [['Winkelverbinder 90 × 90 × 40 + Dübel 8 mm', `${nWall} Stk`, 'Wandanker, 2 je Wandmodul']] : []),
+      ...(nFloor ? [['Winkelverbinder + Bodenanker', `${nFloor} Stk`, 'Insel am Boden verschrauben']] : []),
+      ['Unterlegplatte Kunststoff 3–5 mm', `${nPads} Stk`, 'unter die Bodenbalken'],
+      ...(hinges ? [['Möbelscharnier / Aufschraubband', `${hinges} Stk`, '3 je Tür'], ['Griff + Magnetschnäpper', `${handles} Stk`, '1 je Tür']] : []),
+      ...['65', '45', '22'].filter(k => boxes[k]).map(k => [`IKEA SAMLA mit Deckel ${k} l`, `${boxes[k]} Stk`, '']),
     ];
-    msgs.push(['info', 'Sicherheit: Jedes Modul oben an der Wand sichern. Vor dem Bohren Leitungen prüfen. Im Keller Unterlegplatten verwenden und das Holz einige Tage akklimatisieren. Entwurf – Maße am ersten Fach mit echten Boxen testen.']);
+    plan.steps = [
+      `<b>Schablonen bauen</b> (einmal, aus Resten): Maßlatten, Abstandsplatten${nBox ? ' A–D' : ''}, Abstandshölzer für jede Fachbreite, Schraubschablone.`,
+      `<b>Zuschneiden</b> laut Zuschnittliste – immer mit der Maßlatte am frischen Ende.${osbSheets ? ' OSB im Baumarkt schneiden lassen.' : ''}`,
+      `<b>Rahmen liegend bauen:</b> 2 Balken flach hinlegen, ersten Pfosten bündig. Passendes Abstandsholz für das jeweilige Fach einlegen, nächsten Pfosten dagegen, 2 × 6 × 120 je Ende. Pro Modul 2 Rahmen.`,
+      `<b>Rechtwinklig + Lochband:</b> Diagonalen gleich lang? Dann eine Diagonale Lochband auf die Rückseite.`,
+      `<b>Aufstellen:</b> Unterlegplatten unter die Balken. Hinteren Rahmen mit ${cmS(v.wallGap)} cm Wandabstand, vorderen ${cmS(v.T)} cm davor.${R.insel ? ` Insel: ${v.insel === 'dbl' ? 'zwei Regale Rücken an Rücken stellen und verschrauben, ' : ''}mit Winkeln am Boden verschrauben.` : ''}`,
+      `<b>Latten von unten nach oben:</b> Abstandsplatte auf Balken bzw. untere Latte stellen, Latte auflegen, mit Schraubschablone vorbohren, 2 × 4,5 × 60 je Ende. Linke Latte Bohrbild A, rechte B.`,
+      ...(cnt.boeden || cnt.schrank ? [`<b>Böden:</b> OSB-Böden auf die Latten legen, je 4 Schrauben 4 × 30. Fächer über 80 cm mittig zusätzlich unterstützen.`] : []),
+      ...(cnt.schrank ? [`<b>Schrank:</b> Rück- und Seitenwände aus OSB ${v.osb2} mm aufschrauben, Türen mit 3 Bändern an die Pfosten, Griff und Magnetschnäpper.`] : []),
+      `<b>Sichern:</b> Wandmodule oben mit 2 Winkeln an die Wand. Benachbarte Module verschrauben${v.form !== 'I' ? ', Ecken mit Kantholz-Rest über der Stoßkante' : ''}.`,
+      ...(nBox ? [`<b>Boxen einhängen:</b> Prüfstab ${cmS(v.clear)} cm muss leicht durchgehen. Schienen-Oberkanten anschleifen. Schweres nach unten, max. ca. 15 kg je Box.`] : []),
+    ];
+    msgs.push(['info', 'Vor dem Bohren Leitungen prüfen. Im Keller Holz einige Tage akklimatisieren. Entwurf – erstes Fach mit echten Boxen testen.']);
 
-    // Schraubschablone 1:1
+    // Schraubschablone
     const sw = 100, sh = v.lh;
     const tpl = (pat, y0) => {
       let b = S.rect(0, y0, sw, sh, 'fill="none" stroke="#000" stroke-width="0.3"');
       b += S.line(0, y0, sw, y0, 'stroke="#000" stroke-width="1"') + S.line(sw, y0, sw, y0 + sh, 'stroke="#000" stroke-width="1"');
-      b += S.text(2, y0 - 2, `Bohrbild ${pat} – ${pat === 'A' ? 'linke' : 'rechte'} Schiene eines Fachs · Anschlag oben + Ende (dick)`, 'font-size="3"');
-      const pts = pat === 'A' ? [[sw - 20, 15], [sw - 58, 35]] : [[sw - 58, 15], [sw - 20, 35]];
-      pts.forEach(([x, y]) => { b += holeMark(x, y0 + y, 3); });
+      b += S.text(2, y0 - 2, `Bohrbild ${pat} – ${pat === 'A' ? 'linke' : 'rechte'} Latte eines Fachs · Anschlag oben + Ende (dick)`, 'font-size="3"');
+      (pat === 'A' ? [[sw - 20, 15], [sw - 58, 35]] : [[sw - 58, 15], [sw - 20, 35]]).forEach(([x, y]) => { b += holeMark(x, y0 + y, 3); });
       b += S.text(sw - 20, y0 + sh + 4, '2,0', 'font-size="2.6" text-anchor="middle"') + S.text(sw - 58, y0 + sh + 4, '5,8', 'font-size="2.6" text-anchor="middle"');
       b += S.text(sw + 2, y0 + 16, '1,5', 'font-size="2.6"') + S.text(sw + 2, y0 + 36, '3,5', 'font-size="2.6"');
       return b;
     };
-    plan.templates = [{ title: 'Schraubschablone Schienen-Ende A/B', w: 120, h: 2 * sh + 40, body: tpl('A', 10) + tpl('B', 10 + sh + 20), hint: 'an beiden Schienen-Enden verwenden, immer vom Ende aus' }];
+    plan.templates = [{ title: 'Schraubschablone Latten-Ende A/B', w: 120, h: 2 * sh + 40, body: tpl('A', 10) + tpl('B', 10 + sh + 20), hint: 'an beiden Enden verwenden, immer vom Ende aus' }];
     return plan;
   },
 };
@@ -996,7 +1196,7 @@ const toolJigs = {
 /* =====================================================================
    App-Rahmen: Formular, Speicherung, Tabs
    ===================================================================== */
-const TOOLS = [toolBoxen, toolCleat, toolJigs];
+const TOOLS = [toolRegal, toolCleat, toolJigs];
 const STORE = 'bauplan-app-v1';
 let state = {};
 try { state = JSON.parse(localStorage.getItem(STORE)) || {}; } catch (e) { state = {}; }
@@ -1040,6 +1240,7 @@ function buildForm(tool, el) {
       h += `</div></div>`;
     });
     h += `</fieldset>`;
+    if (tool.extraAfter === g) h += `<div class="extra"></div>`;
   }
   h += `<div class="actions"><button class="btn" data-print="1">Plan drucken / als PDF</button><button class="btn sec" data-reset="1">Standardwerte</button></div>`;
   h += `<p class="note">Eingaben werden auf diesem Gerät gespeichert.</p>`;
@@ -1059,17 +1260,29 @@ function mountTool(tool) {
   root.id = 'tool-' + tool.id;
   root.innerHTML = `<div class="card inputs"></div><div class="card out"></div>`;
   const form = root.querySelector('.inputs');
-  buildForm(tool, form);
   const st = () => state[tool.id] || (state[tool.id] = {});
+  const refreshExtra = force => {
+    if (!tool.extra) return;
+    const x = form.querySelector('.extra');
+    if (x && (force || !x.contains(document.activeElement))) x.innerHTML = tool.extra(values(tool), st());
+  };
+  const rebuild = () => { buildForm(tool, form); refreshExtra(true); };
+  const recalcAll = () => { recalc(tool, root); refreshExtra(false); };
+  rebuild();
   const setField = (id, val) => { st()[id] = val; };
+  form.addEventListener('change', e => {
+    if (!e.target.closest('.extra') || !tool.onExtra) return;
+    tool.onExtra(st(), e.target, 'change'); save(); refreshExtra(true); recalc(tool, root);
+  });
   form.addEventListener('input', e => {
     const el = e.target;
+    if (el.closest('.extra')) return;
     if (el.dataset.f) {
       const f = tool.fields.find(x => x.id === el.dataset.f);
       const val = f.type === 'select' ? el.value : el.value.replace(',', '.');
       setField(f.id, val);
       if (f.onchange) { f.onchange(val, setField); }
-      if (f.type === 'select') { buildForm(tool, form); }
+      if (f.type === 'select') { rebuild(); }
     } else if (el.dataset.m) {
       const i = +el.closest('.modrow').dataset.i;
       const mods = values(tool).modules;
@@ -1077,22 +1290,23 @@ function mountTool(tool) {
       mods[i][k] = k === 'type' ? el.value : Number(el.value) || 0;
       if (k === 'type') Object.assign(mods[i], MODS[el.value].def);
       st().modules = mods;
-      if (k === 'type') buildForm(tool, form);
+      if (k === 'type') rebuild();
     }
     save();
     clearTimeout(timer);
-    timer = setTimeout(() => recalc(tool, root), 150);
+    timer = setTimeout(recalcAll, 150);
   });
   form.addEventListener('click', e => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.closest('.extra')) { if (tool.onExtra) { tool.onExtra(st(), b, 'click'); save(); refreshExtra(true); recalc(tool, root); } return; }
     if (b.dataset.print) { window.print(); return; }
-    if (b.dataset.reset) { if (confirm('Alle Eingaben dieses Tools auf Standard zurücksetzen?')) { state[tool.id] = {}; save(); buildForm(tool, form); recalc(tool, root); } return; }
+    if (b.dataset.reset) { if (confirm('Alle Eingaben dieses Tools auf Standard zurücksetzen?')) { state[tool.id] = {}; save(); rebuild(); recalc(tool, root); } return; }
     if (b.dataset.add) { const mods = values(tool).modules; mods.push({ type: 'ablage', qty: 1, ...MODS.ablage.def }); st().modules = mods; }
     if (b.dataset.del != null) { const mods = values(tool).modules; mods.splice(+b.dataset.del, 1); st().modules = mods; }
-    save(); buildForm(tool, form); recalc(tool, root);
+    save(); rebuild(); recalc(tool, root);
   });
-  recalc(tool, root);
+  recalcAll();
   return root;
 }
 
