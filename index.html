@@ -1218,7 +1218,7 @@ const toolCleat = {
 /* =====================================================================
    TOOL 3: Schienen & Schablonen
    ===================================================================== */
-const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag']];
+const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag'], ['saw', 'Kappsägen-Tisch mit Klappflügeln + Lehrenaufnahme']];
 const isJig = (...ids) => v => ids.includes(v.jig);
 const toolJigs = {
   id: 'jigs',
@@ -1241,6 +1241,23 @@ const toolJigs = {
     { g: 'Lochreihe', id: 'depth', label: 'Bohrtiefe', def: 12, unit: 'mm', show: isJig('holes32') },
     { g: 'Ablänglehre', id: 'Lz', label: 'Ziellänge', def: 445, unit: 'mm', show: isJig('stop') },
     { g: 'Ablänglehre', id: 'qty', label: 'Stückzahl', def: 24, unit: 'Stk', show: isJig('stop') },
+    { g: 'Deine Säge (messen!)', id: 'sB', label: 'Grundplatte Breite', def: 560, unit: 'mm', show: isJig('saw') },
+    { g: 'Deine Säge (messen!)', id: 'sT', label: 'Grundplatte Tiefe', def: 450, unit: 'mm', show: isJig('saw') },
+    { g: 'Deine Säge (messen!)', id: 'sH', label: 'Tischhöhe der Säge', def: 100, unit: 'mm', help: 'Unterkante Grundplatte bis Auflagefläche', show: isJig('saw') },
+    { g: 'Deine Säge (messen!)', id: 'sP', label: 'Sägeblatt ab linker Grundplattenkante', def: 280, unit: 'mm', help: 'bis zum Zahn (linke Schnittkante)', show: isJig('saw') },
+    { g: 'Deine Säge (messen!)', id: 'sF', label: 'Höhe Sägeanschlag', def: 70, unit: 'mm', show: isJig('saw') },
+    { g: 'Deine Säge (messen!)', id: 'sFy', label: 'Anschlag ab Tisch-Vorderkante', def: 300, unit: 'mm', help: 'nach dem Aufstellen messen', show: isJig('saw') },
+    { g: 'Tisch', id: 'swh', label: 'Arbeitshöhe (Oberkante Sägetisch)', def: 900, unit: 'mm', show: isJig('saw') },
+    { g: 'Tisch', id: 'sRoll', label: 'Rollen-Bauhöhe', def: 100, unit: 'mm', help: '0 = ohne Rollen', show: isJig('saw') },
+    { g: 'Tisch', id: 'wL', label: 'Flügel links (Lehrenaufnahme)', def: 700, unit: 'mm', show: isJig('saw') },
+    { g: 'Tisch', id: 'wR', label: 'Flügel rechts', def: 600, unit: 'mm', show: isJig('saw') },
+    { g: 'Tisch', id: 'stw', label: 'Plattenstärke', def: 18, unit: 'mm', show: isJig('saw') },
+    { g: 'Tisch', id: 'sclad', label: 'Seitenverkleidung OSB', def: 12, unit: 'mm', help: '0 = ohne', show: isJig('saw') },
+    { g: 'Tisch', id: 'skb', label: 'Kantholz Breite', def: 58, unit: 'mm', show: isJig('saw') },
+    { g: 'Tisch', id: 'skt', label: 'Kantholz Stärke', def: 38, unit: 'mm', show: isJig('saw') },
+    { g: 'Lehrenaufnahme', id: 'Lmax', label: 'Längste Lehre / Werkstück', def: 1500, unit: 'mm', show: isJig('saw') },
+    { g: 'Lehrenaufnahme', id: 'gW', label: 'Lehre Stärke', def: 30, unit: 'mm', help: 'Dachlatte 50 × 30 hochkant = 30', show: isJig('saw') },
+    { g: 'Lehrenaufnahme', id: 'gH', label: 'Lehre Höhe', def: 50, unit: 'mm', show: isJig('saw') },
   ],
   compute(v) {
     const msgs = [], plan = { title: JIGS.find(j => j[0] === v.jig)[1], msgs };
@@ -1345,7 +1362,194 @@ const toolJigs = {
       g += dimH(0, v.Lz, 80 + fs * 1.5, num(v.Lz), fs);
       plan.drawings = [drawing(-fs, -fs * 3, len + fs * 2, 80 + fs * 5, g, 'Draufsicht: Abstand Sägeblatt → Anschlagklotz')];
       plan.templates = [];
+    } else if (v.jig === 'saw') {
+      // ===== Kappsägen-Tisch mit Klappflügeln und Lehrenaufnahme =====
+      const kb = v.skb, kt = v.skt, clr = 10, tw = v.stw, clad = v.sclad;
+      const Bi = v.sB + 2 * clr;                         // lichte Breite zwischen den Beinen
+      const Bc = Bi + 2 * kb + 2 * clad;                 // Außenbreite Unterbau
+      const Tc = Math.max(v.sT + 2 * clr + 2 * kt, 480);  // Tiefe Unterbau = Flügeltiefe
+      const wh = v.swh;
+      const deckTop = wh - v.sH;                         // Oberkante Deckplatte (Säge steht darauf)
+      const sideTop = wh - tw;                           // Oberkante Seitenrahmen, darauf Deckleiste (bündig)
+      const foot = kt;                                   // Fußholm liegt flach
+      const legL = sideTop - v.sRoll - foot;
+      const shelfTop = v.sRoll + foot + 180;
+      const bladeX = kb + clad + clr + v.sP;             // Sägeblatt (Zahn, linke Schnittkante) ab linker Außenkante
+      const d0 = bladeX + 2;                             // Sägeblatt → Innenkante linker Flügel (2 mm Scharnierfuge)
+      const nullT = 40, N = Math.round(d0 + nullT);      // Außenseite Nullanschlag = Versatz des Reiters
+      const cw = v.gW + 3, fenceH = Math.max(v.sF, v.gH + 10), chanW = 18 + cw + 18;
+      const need = N + v.Lmax + 60;                      // so weit muss der Kanal reichen
+      const E = Math.max(0, Math.ceil((need - (d0 + v.wL)) / 50) * 50);
+      const minL = Math.ceil((d0 + 20) / 10) * 10;
+      if (deckTop - tw < shelfTop + 150) msgs.push(['err', `Arbeitshöhe zu niedrig für diese Säge: Deckplatte läge bei ${num(deckTop)} mm.`]);
+      if (legL < 300) msgs.push(['err', 'Arbeitshöhe zu niedrig – Beine wären kürzer als 30 cm.']);
+      if (v.wL > sideTop - 30 || v.wR > sideTop - 30) msgs.push(['warn', `Flügel länger als ${num(sideTop - 30)} mm stoßen abgeklappt auf den Boden. Flügel kürzer machen.`]);
+      if (E > 900) msgs.push(['warn', `Steckverlängerung ${num(E)} mm lang – besser linken Flügel länger machen oder einen Rollenbock statt Stützbein verwenden.`]);
+      const brs = [200, 250, 300, 350, 400, 450, 500, 600];
+      const brk = l => brs.filter(b => b <= Math.min(l * 0.8, sideTop - v.sRoll - 60)).pop() || 200;
+      const bL = brk(v.wL), bR = brk(v.wR);
+      plan.kpis = [
+        ['Arbeitshöhe', mm(wh)], ['Unterbau B × T', `${num(Bc)} × ${num(Tc)}`],
+        ['Deckplatte (Säge) auf', mm(deckTop)], ['Reiter-Versatz N', mm(N)],
+        ['Längen mit Lehre', `${num(minL)} … ${num(v.Lmax)} mm`], ['Steckverlängerung', E ? mm(E) : 'nicht nötig'],
+      ];
+      msgs.push(['info', `So kommt die Lehre auf ihre Länge: Die Lehre liegt im Kanal ab dem Nullanschlag (${num(N)} mm vom Sägeblatt). Der Reiter hat seine Anschlagnase genau ${num(N)} mm vor seinem Taster – schiebst du den Taster ans Lehrenende, steht die Nase exakt auf der Lehrenlänge. Einmal mit Probeschnitt justieren.`]);
+      if (v.sH < 60 || v.sH > 160) msgs.push(['warn', 'Tischhöhe der Säge ungewöhnlich – bitte nachmessen (Unterkante Grundplatte bis Auflagefläche).']);
+
+      const L = (name, qty, l, b, t, mat, note) => ({ name, qty, l, b, t, mat, note });
+      const parts = [
+        L('Bein', 4, legL, kb, kt, 'Kantholz', `Unterkante ${num(v.sRoll + foot)} über Boden`),
+        L('Fußholm (flach, Rollen darunter)', 2, Tc, kb, kt, 'Kantholz', ''),
+        L('Seitenriegel (oben / Deck / Boden)', 6, Tc - 2 * kt, kb, kt, 'Kantholz', '3 je Seite, zwischen die Beine'),
+        L('Querriegel vorne/hinten (Deck + Boden)', 4, Bi, kb, kt, 'Kantholz', `Deck-Riegel Oberkante ${num(deckTop - tw)} mm`),
+        L('Deckplatte (Säge)', 1, Bi, Tc - 2 * kt, tw, 'Multiplex/OSB', `Oberkante genau ${num(deckTop)} mm`),
+        L('Ablageboden', 1, Bi, Tc - 2 * kt, tw, 'OSB', ''),
+        L('Deckleiste (bündig Arbeitshöhe)', 2, Tc, kb + clad, tw, 'Multiplex', `Oberkante ${num(wh)} mm`),
+        ...(clad ? [L('Seitenverkleidung', 2, Tc, sideTop - v.sRoll - foot, clad, 'OSB', 'außen auf die Seitenrahmen')] : []),
+        L('Flügel links (mit Lehrenaufnahme)', 1, v.wL, Tc, tw, 'Multiplex', ''),
+        L('Flügel rechts', 1, v.wR, Tc, tw, 'Multiplex', ''),
+        L('Anschlagleiste', 1, v.wL - nullT, fenceH, 18, 'Multiplex', 'in Flucht mit dem Sägeanschlag'),
+        L('Kanal-Rückwand', 1, v.wL - nullT, fenceH, 18, 'Multiplex', `Abstand zur Anschlagleiste ${num(cw)} mm (Lehre + 3)`),
+        L('Nullanschlag', 1, chanW, fenceH, nullT, 'Hartholz', `Außenseite genau ${num(N)} mm vom Sägeblatt`),
+        L('Reiter-Deckleiste', 1, N + 40, chanW + 20, 18, 'Multiplex', 'läuft oben auf Anschlagleiste + Kanal'),
+        L('Reiter-Taster', 1, 40, cw - 1, fenceH - 10, 'Hartholz', 'greift in den Kanal, liegt am Lehrenende an'),
+        L('Reiter-Anschlagnase', 1, 40, 30, fenceH + 15, 'Hartholz', 'vor der Anschlagleiste, Langloch zum Justieren'),
+        L('Reiter-Klemmwange', 1, N + 40, fenceH, 18, 'Multiplex', 'hinten, mit Sterngriff'),
+      ];
+      if (E) parts.push(
+        L('Steckverlängerung Grundbrett', 1, E + 150, chanW + 60, 18, 'Multiplex', '150 mm überlappen unter dem Flügel'),
+        L('Steckverlängerung Anschlag + Rückwand', 2, E, fenceH, 18, 'Multiplex', 'stumpf an die Flügelleisten'),
+        L('Stützbein', 1, wh - 2 * 18 - 30, 58, 38, 'Kantholz', 'mit Stellfuß, klappbar'),
+      );
+      plan.parts = parts;
+      plan.buy = [
+        [`Kantholz ${kb} × ${kt} mm`, `ca. ${Math.ceil((4 * legL + 2 * Tc + 6 * (Tc - 2 * kt) + 4 * Bi + (E ? wh : 0)) * 1.15 / 2500)} × 2,5 m`, 'Beine, Riegel, Fußholme'],
+        ['Multiplex 18 mm', `ca. ${((v.wL + v.wR) * Tc / 1e6 + 2 * Bi * (Tc - 2 * kt) / 1e6 + 0.3 + (E ? 0.3 : 0)).toFixed(2).replace('.', ',')} m²`, 'Flügel, Deck, Leisten – im Baumarkt zuschneiden lassen'],
+        ...(clad ? [[`OSB ${clad} mm`, `ca. ${(2 * Tc * legL / 1e6).toFixed(2).replace('.', ',')} m²`, 'Seitenverkleidung']] : []),
+        [`Lenkrollen Ø ${v.sRoll >= 100 ? 75 : 50} mm mit Platte`, v.sRoll ? '4 Stk (2 mit Bremse)' : '–', `Bauhöhe ca. ${num(v.sRoll)} mm`],
+        [`Klappkonsole ${bL} mm`, '2 Stk', 'linker Flügel, Tragkraft ≥ 50 kg'],
+        [`Klappkonsole ${bR} mm`, '2 Stk', 'rechter Flügel'],
+        ['Scharnier / Klavierband', `2 × ${num(Tc - 40)} mm`, 'Flügel an die Deckleiste'],
+        ['Holzschraube 5 × 80', 'ca. 60 Stk', 'Rahmen'],
+        ['Holzschraube 4 × 40', 'ca. 80 Stk', 'Platten, Leisten'],
+        ['Schlossschraube M8 × 60 + Mutter + U-Scheibe', '4 Stk', 'Säge auf der Deckplatte'],
+        ['Sterngriffschraube M8 × 40 + Einschlagmutter M8', '1 Satz', 'Reiter klemmen'],
+        ...(E ? [['Holzdübel Ø 10 + Kistenverschluss', '2 + 1', 'Steckverlängerung'], ['Stellfuß M8 + Klappscharnier', '1 + 1', 'Stützbein']] : []),
+        ['Holzleim, Schleifpapier, Wachs', '–', 'Wachs auf Flügel und Kanal: Werkstück und Reiter gleiten besser'],
+      ];
+      plan.jigs = [
+        ['Richtlatte (gerade Latte ≥ 1,5 m)', '–', 'Sägetisch → Deckleisten → Flügel bündig prüfen; Anschlagflucht'],
+        ['Abstandsklotz Deckhöhe', mm(deckTop - tw - v.sRoll - foot), 'Deck-Riegel ohne Messen einsetzen (Fußholm → Unterkante Riegel)'],
+        ['Probe-Lehre', '600 mm', 'zum Justieren des Reiters (z. B. eure Maßlatte 60,0)'],
+      ];
+      plan.steps = [
+        `<b>Säge vermessen:</b> Tischhöhe (Unterkante Grundplatte → Auflagefläche) ${mm(v.sH)}, Grundplatte ${num(v.sB)} × ${num(v.sT)} mm, Sägeblatt-Zahn (linke Schnittkante) ${mm(v.sP)} ab linker Grundplattenkante. Diese Maße bestimmen alles – zweimal messen.`,
+        `<b>Zuschnitt</b> laut Liste. Multiplex im Baumarkt schneiden lassen, Kantholz mit Anschlag kappen.`,
+        `<b>Seitenrahmen:</b> je 2 Beine (${mm(legL)}) mit 3 Seitenriegeln verschrauben: oben bündig, Deck-Riegel Oberkante ${mm(deckTop - tw)}, Boden-Riegel Oberkante ${mm(shelfTop - tw)} (alle Maße ab Boden auf Rollen). Unten den Fußholm flach unter die Beine.`,
+        `<b>Unterbau verbinden:</b> 4 Querriegel (${mm(Bi)}) vorne/hinten auf Deck- und Bodenhöhe. Diagonalen gleich lang? Dann Deckplatte und Ablageboden einlegen und verschrauben. Rollen unter die Fußholme.`,
+        `<b>Deckleisten + Verkleidung:</b> ${clad ? `Seitenverkleidung (OSB ${clad} mm) außen aufschrauben, dann ` : ''}Deckleisten oben auf die Seitenrahmen – Oberkante genau Arbeitshöhe ${mm(wh)}.`,
+        `<b>Säge einsetzen:</b> Säge auf die Deckplatte stellen, Blatt-Zahn ${mm(v.sP + clr)} von der linken Bein-Innenseite. Richtlatte über Sägetisch und beide Deckleisten legen: muss überall aufliegen. Zu tief? Streifen unterlegen. Mit 4 Schlossschrauben M8 fixieren.`,
+        `<b>Flügel:</b> Mit Klavierband an die Außenkante der Deckleisten schrauben, Klappkonsolen (${bL} / ${bR} mm) darunter an die Seitenrahmen. Flügel hochklappen, Richtlatte: Flügel, Deckleisten und Sägetisch eine Ebene.`,
+        `<b>Lehrenaufnahme (linker Flügel):</b> Richtlatte an den Sägeanschlag legen und bis über den Flügel verlängern – daran die Anschlagleiste ausrichten und verschrauben. Kanal-Rückwand mit ${mm(cw)} Abstand dahinter. Nullanschlag quer an den Kanalanfang: Außenseite genau ${mm(N)} vom Sägeblatt-Zahn.`,
+        ...(E ? [`<b>Steckverlängerung:</b> Grundbrett ${mm(E + 150)} mit Anschlag + Rückwand in gleicher Flucht, 150 mm schiebt sich unter den Flügel (2 Dübel + Kistenverschluss). Stützbein mit Stellfuß auf Arbeitshöhe einstellen. Damit reicht der Kanal bis ${mm(d0 + v.wL + E)} – Lehren bis ${mm(v.Lmax)}.`] : []),
+        `<b>Reiter bauen:</b> Deckleiste ${mm(N + 40)} lang. Am einen Ende der Taster (greift in den Kanal), am anderen Ende die Anschlagnase (vor der Anschlagleiste, mit Langloch) – Abstand Taster-Anlagefläche → Nasen-Anschlagfläche genau ${mm(N)} (Schablone 1:1 unten). Hinten die Klemmwange mit Sterngriff.`,
+        `<b>Justieren:</b> Probe-Lehre (600 mm) mit dem Endanschlag an den Nullanschlag in den Kanal legen, Reiter mit dem Taster ans Lehrenende schieben, klemmen. Probestück an die Nase, schneiden, messen. Abweichung über das Langloch der Nase korrigieren – gilt danach für jede Lehre.`,
+        `<b>Benutzen:</b> Lehre einlegen → Reiter ans Lehrenende → klemmen → Lehre herausnehmen (oder liegen lassen, sie stört hinter der Anschlagleiste nicht) → Werkstück an die Nase, festhalten, sägen. Kürzer als ${mm(minL)}: direkt am Sägeanschlag anzeichnen. Rollen vorher feststellen.`,
+      ];
+      msgs.push(['warn', 'Sicherheit: Beim Einstellen Säge abstecken. Rollen feststellen. Werkstück zwischen Blatt und Nase immer festhalten und das Blatt erst im Stillstand hochfahren.']);
+
+      // --- Vorderansicht ---
+      const X0 = -(v.wL + E), X1 = Bc + v.wR, Wtot = X1 - X0;
+      const fs = Wtot / 42, Zt = wh + 420;
+      const Y = z => Zt - z;
+      let g = S.line(X0 - 50, Y(0), X1 + 50, Y(0), 'stroke="#333" stroke-width="2"');
+      if (v.sRoll) [kb / 2 + 20, Bc - kb / 2 - 20].forEach(x => { g += S.circle(x, Y(v.sRoll / 2), v.sRoll / 2, 'fill="#555"'); });
+      g += S.rect(0, Y(v.sRoll + foot), Bc, foot, 'class="wood2"');
+      g += S.rect(0, Y(sideTop), kb, legL, 'class="wood2"') + S.rect(Bc - kb, Y(sideTop), kb, legL, 'class="wood2"');
+      if (clad) g += S.rect(-0.1, Y(sideTop), clad, legL, 'fill="#e9dcc2" stroke="#8a7a60"') + S.rect(Bc - clad, Y(sideTop), clad, legL, 'fill="#e9dcc2" stroke="#8a7a60"');
+      g += S.rect(kb + clad, Y(deckTop - tw) , Bi, kb, 'class="wood"') + S.rect(kb + clad, Y(deckTop), Bi, tw, 'class="wood2"');
+      g += S.rect(kb + clad, Y(shelfTop - tw), Bi, kb, 'class="wood"') + S.rect(kb + clad, Y(shelfTop), Bi, tw, 'class="wood2"');
+      g += S.rect(0, Y(wh), kb + clad, tw, 'class="wood2"') + S.rect(Bc - kb - clad, Y(wh), kb + clad, tw, 'class="wood2"');
+      // Säge
+      const sx = kb + clad + clr;
+      g += S.rect(sx, Y(wh), v.sB, v.sH, 'fill="#b8c2cc" stroke="#555"');
+      g += S.rect(bladeX - 60, Y(wh + 330), 260, 250, 'fill="#5b8a5b" stroke="#333" rx="30"');
+      g += S.line(bladeX, Y(wh + 360), bladeX, Y(wh - 30), 'stroke="#c2410c" stroke-width="2" stroke-dasharray="8 5"');
+      g += S.text(bladeX + 8, Y(wh + 370), 'Sägeblatt', `font-size="${fs * 0.7}" fill="#c2410c"`);
+      // Flügel + Konsolen
+      g += S.rect(-v.wL - 2, Y(wh), v.wL, tw, 'class="wood"') + S.rect(Bc + 2, Y(wh), v.wR, tw, 'class="wood"');
+      g += S.pline([[-2, Y(sideTop - bL)], [-bL, Y(wh - tw)]], 'stroke="#555" stroke-width="3"') + S.pline([[Bc + 2, Y(sideTop - bR)], [Bc + bR, Y(wh - tw)]], 'stroke="#555" stroke-width="3"');
+      // Anschlag/Kanal links
+      g += S.rect(-v.wL - 2, Y(wh + fenceH), v.wL - nullT, fenceH, 'fill="#f6e3c4" stroke="#6b4a1f"');
+      g += S.rect(-2 - nullT, Y(wh + fenceH), nullT, fenceH, 'fill="#8a6a3a" stroke="#4a3213"');
+      if (E) {
+        g += S.rect(-v.wL - E - 2, Y(wh), E + 150, tw, 'class="wood"') + S.rect(-v.wL - E - 2, Y(wh + fenceH), E, fenceH, 'fill="#f6e3c4" stroke="#6b4a1f"');
+        g += S.rect(-v.wL - E + 20, Y(wh - tw), 38, wh - tw, 'class="wood2"');
+      }
+      // Beispiel: Lehre Lmax + Reiter
+      const lx1 = bladeX - N, lx0 = lx1 - v.Lmax;
+      g += S.rect(lx0, Y(wh + fenceH + 60), v.Lmax, 26, 'fill="#fde7d9" stroke="#c2410c"');
+      g += S.text((lx0 + lx1) / 2, Y(wh + fenceH + 68), `Lehre ${num(v.Lmax)} (liegt im Kanal)`, `font-size="${fs * 0.6}" text-anchor="middle" fill="#c2410c"`);
+      const nose = bladeX - v.Lmax;
+      g += S.rect(nose - N - 40, Y(wh + fenceH + 18), N + 40, 18, 'fill="#f2c94c" stroke="#7a5a00"');
+      g += S.rect(nose - 30, Y(wh + fenceH + 18), 30, fenceH + 18 - 5, 'fill="#f2c94c" stroke="#7a5a00"');
+      g += S.text(nose - N / 2, Y(wh + fenceH + 26), 'Reiter', `font-size="${fs * 0.6}" text-anchor="middle"`);
+      // Maße
+      g += dimV(Y(wh), Y(0), X1 + fs * 1.2, `${num(wh)}`, fs * 0.8);
+      g += dimV(Y(deckTop), Y(0), Bc / 2, `Deck ${num(deckTop)}`, fs * 0.65);
+      g += dimH(nose, bladeX, Y(wh + fenceH + 120), `Werkstück ${num(v.Lmax)}`, fs * 0.8);
+      g += dimH(lx1, bladeX, Y(-120), `N = ${num(N)}`, fs * 0.8);
+      g += dimH(-v.wL - 2, -2, Y(-260), `Flügel ${num(v.wL)}`, fs * 0.7);
+      if (E) g += dimH(-v.wL - E - 2, -v.wL - 2, Y(-260), `Verlängerung ${num(E)}`, fs * 0.7);
+      g += dimH(Bc + 2, Bc + 2 + v.wR, Y(-260), `${num(v.wR)}`, fs * 0.7);
+      const front = drawing(X0 - fs * 2, Y(wh + 520), Wtot + fs * 5, wh + 520 + 340, g, 'Vorderansicht, Flügel hochgeklappt (Maße in mm). Gelb = Reiter, an das Ende der Lehre geschoben – die Nase steht genau auf Lehrenlänge.');
+
+      // --- Reiter-Detail (Draufsicht-Schnitt von vorne) ---
+      const rl = N + 40, f2 = rl / 22;
+      let r = S.rect(0, 0, rl, 18, 'fill="#f2c94c" stroke="#7a5a00"');
+      r += S.rect(rl - 40, 18, 40, fenceH - 10, 'fill="#e0b23a" stroke="#7a5a00"');
+      r += S.rect(0, 18, 30, fenceH + 15 - 18, 'fill="#e0b23a" stroke="#7a5a00"');
+      r += S.rect(-200, 18 + fenceH - 10 + 10, rl + 400, 18, 'class="wood"');
+      r += S.rect(rl, 18 + 5, 260, 26, 'fill="#fde7d9" stroke="#c2410c"') + S.text(rl + 130, 18 + 23, 'Lehrenende', `font-size="${f2 * 0.7}" text-anchor="middle" fill="#c2410c"`);
+      r += S.rect(-200, 18 + 5, 160, fenceH - 5, 'fill="#eef3f7" stroke="#5b6b7a"') + S.text(-120, 18 + fenceH / 2 + 8, 'Werkstück', `font-size="${f2 * 0.6}" text-anchor="middle"`);
+      r += dimH(30, rl, -f2 * 1.1, `N = ${num(N)} (Nase → Taster)`, f2 * 0.8);
+      r += S.text(rl - 20, 18 + fenceH + 20 + f2, 'Taster', `font-size="${f2 * 0.65}" text-anchor="middle"`) + S.text(15, 18 + fenceH + 20 + f2 + 20, 'Nase', `font-size="${f2 * 0.65}" text-anchor="middle"`);
+      const reiter = drawing(-230, -f2 * 3, rl + 520, fenceH + 18 + 80 + f2 * 4, r, 'Reiter von vorne: Nasen-Anschlagfläche und Taster-Anlagefläche liegen genau N auseinander.');
+
+      // --- 3D ---
+      const cubes = [], C = (x0, x1, y0, y1, z0, z1, c) => cubes.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), y0: Math.min(y0, y1), y1: Math.max(y0, y1), z0, z1, c });
+      [[0, kb], [Bc - kb, Bc]].forEach(([a, b]) => {
+        C(a, b, 0, Tc, v.sRoll, v.sRoll + foot, 'wood');
+        [[0, kt], [Tc - kt, Tc]].forEach(([c0, c1]) => C(a, b, c0, c1, v.sRoll + foot, sideTop, 'wood'));
+        [sideTop, deckTop - tw, shelfTop - tw].forEach(zt => C(a, b, kt, Tc - kt, zt - kb, zt, 'wood'));
+      });
+      [[0, kt], [Tc - kt, Tc]].forEach(([c0, c1]) => { C(kb, Bc - kb, c0, c1, deckTop - tw - kb, deckTop - tw, 'wood'); C(kb, Bc - kb, c0, c1, shelfTop - tw - kb, shelfTop - tw, 'wood'); });
+      C(kb + clad, Bc - kb - clad, kt, Tc - kt, deckTop - tw, deckTop, 'osb'); C(kb + clad, Bc - kb - clad, kt, Tc - kt, shelfTop - tw, shelfTop, 'osb');
+      if (clad) { C(-clad, 0, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); C(Bc, Bc + clad, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); }
+      C(-clad, kb, 0, Tc, sideTop, wh, 'osb'); C(Bc - kb, Bc + clad, 0, Tc, sideTop, wh, 'osb');
+      const ys = (Tc - v.sT) / 2;
+      C(sx, sx + v.sB, ys, ys + v.sT, deckTop, wh, '#aab4be');
+      C(bladeX - 60, bladeX + 200, ys + v.sT - 140, ys + v.sT - 40, wh, wh + 260, '#4f7f4f');
+      const xl = -clad - 2, yF = Tc - v.sFy;
+      C(xl - v.wL, xl, 0, Tc, wh - tw, wh, 'osb'); C(Bc + clad + 2, Bc + clad + 2 + v.wR, 0, Tc, wh - tw, wh, 'osb');
+      C(xl - v.wL, xl - nullT, yF - 18, yF, wh, wh + fenceH, '#f6e3c4'); C(xl - v.wL, xl - nullT, yF - 36 - cw, yF - 18 - cw, wh, wh + fenceH, '#f6e3c4');
+      C(xl - nullT, xl, yF - 36 - cw, yF, wh, wh + fenceH, '#8a6a3a');
+      if (E) { C(xl - v.wL - E, xl - v.wL + 150, yF - chanW - 30, yF + 30, wh - 2 * tw, wh - tw, 'osb'); C(xl - v.wL - E, xl - v.wL, yF - 18, yF, wh - tw, wh + fenceH - tw, '#f6e3c4'); C(xl - v.wL - E + 20, xl - v.wL - E + 78, yF - 60, yF - 22, 0, wh - 2 * tw, 'wood'); }
+      const rx1 = -(v.Lmax - bladeX);
+      C(rx1 - N - 40, rx1, yF - chanW, yF + 30, wh + fenceH, wh + fenceH + 18, 'hi'); C(rx1 - 30, rx1, yF, yF + 30, wh + 20, wh + fenceH, 'hi');
+      const iso = iso3dSvg(cubes, { w: Bc, d: Tc }, 'vr', '3D-Ansicht: Unterbau auf Rollen, Säge auf der Deckplatte, Flügel hochgeklappt, links Anschlag mit Lehrenkanal und Reiter (gelb).', { noFloor: true });
+      plan.drawings = [iso, front, reiter];
+
+      // --- Schablone Reiter 1:1 (von vorne) ---
+      let b = S.rect(0, 10, rl, 18, 'fill="none" stroke="#000" stroke-width="0.35"');
+      b += S.rect(rl - 40, 28, 40, fenceH - 10, 'fill="none" stroke="#000" stroke-width="0.35"');
+      b += S.rect(0, 28, 30, fenceH - 3, 'fill="none" stroke="#000" stroke-width="0.35"');
+      b += S.line(30, 4, 30, 28 + fenceH, 'stroke="#c00" stroke-width="0.3" stroke-dasharray="2 1"') + S.line(rl - 40, 4, rl - 40, 28 + fenceH, 'stroke="#c00" stroke-width="0.3" stroke-dasharray="2 1"');
+      b += S.text(32, 7, `Nasen-Anschlagfläche`, 'font-size="3" fill="#c00"') + S.text(rl - 42, 7, `Taster-Anlagefläche – Abstand ${num(N)} mm`, 'font-size="3" fill="#c00" text-anchor="end"');
+      b += holeMark(15, 28 + fenceH / 2, 8) + S.text(15, 28 + fenceH + 6, 'Langloch 8 × 20', 'font-size="2.8" text-anchor="middle"');
+      plan.templates = [{ title: `Reiter 1:1 – Versatz N = ${num(N)} mm`, w: rl + 4, h: fenceH + 40, body: b, hint: 'auf die Reiter-Deckleiste kleben, Taster und Nase an den roten Linien setzen' }];
     }
+
     return plan;
   },
 };
