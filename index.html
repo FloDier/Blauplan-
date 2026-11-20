@@ -1248,6 +1248,8 @@ const toolJigs = {
     { g: 'Deine Säge (messen!)', id: 'sF', label: 'Höhe Sägeanschlag', def: 70, unit: 'mm', show: isJig('saw') },
     { g: 'Deine Säge (messen!)', id: 'sFy', label: 'Anschlag ab Tisch-Vorderkante', def: 300, unit: 'mm', help: 'nach dem Aufstellen messen', show: isJig('saw') },
     { g: 'Tisch', id: 'swh', label: 'Arbeitshöhe (Oberkante Sägetisch)', def: 900, unit: 'mm', show: isJig('saw') },
+    { g: 'Tisch', id: 'sAdj', label: 'Deckplatte', type: 'select', def: 'stell', options: [['stell', 'höhenverstellbar (Stellfüße M10)'], ['fest', 'fest verschraubt']], show: isJig('saw') },
+    { g: 'Tisch', id: 'sAdjR', label: 'Verstellbereich gesamt', def: 40, unit: 'mm', help: 'z. B. 40 = ±20 mm', show: v => v.jig === 'saw' && v.sAdj === 'stell' },
     { g: 'Tisch', id: 'sRoll', label: 'Rollen-Bauhöhe', def: 100, unit: 'mm', help: '0 = ohne Rollen', show: isJig('saw') },
     { g: 'Tisch', id: 'wL', label: 'Flügel links (Lehrenaufnahme)', def: 700, unit: 'mm', show: isJig('saw') },
     { g: 'Tisch', id: 'wR', label: 'Flügel rechts', def: 600, unit: 'mm', show: isJig('saw') },
@@ -1370,6 +1372,9 @@ const toolJigs = {
       const Tc = Math.max(v.sT + 2 * clr + 2 * kt, 480);  // Tiefe Unterbau = Flügeltiefe
       const wh = v.swh;
       const deckTop = wh - v.sH;                         // Oberkante Deckplatte (Säge steht darauf)
+      const adj = v.sAdj === 'stell', aR = adj ? Math.max(10, v.sAdjR) : 0;
+      const lift = adj ? 20 + aR / 2 : 0;                // Stellfuß in Mittelstellung: Luft zwischen Riegel und Platte
+      const railTop = deckTop - tw - lift;               // Oberkante Deck-Riegel (fest)
       const sideTop = wh - tw;                           // Oberkante Seitenrahmen, darauf Deckleiste (bündig)
       const foot = kt;                                   // Fußholm liegt flach
       const legL = sideTop - v.sRoll - foot;
@@ -1381,7 +1386,7 @@ const toolJigs = {
       const need = N + v.Lmax + 60;                      // so weit muss der Kanal reichen
       const E = Math.max(0, Math.ceil((need - (d0 + v.wL)) / 50) * 50);
       const minL = Math.ceil((d0 + 20) / 10) * 10;
-      if (deckTop - tw < shelfTop + 150) msgs.push(['err', `Arbeitshöhe zu niedrig für diese Säge: Deckplatte läge bei ${num(deckTop)} mm.`]);
+      if (railTop < shelfTop + 150) msgs.push(['err', `Arbeitshöhe zu niedrig für diese Säge: Deckplatte läge bei ${num(deckTop)} mm.`]);
       if (legL < 300) msgs.push(['err', 'Arbeitshöhe zu niedrig – Beine wären kürzer als 30 cm.']);
       if (v.wL > sideTop - 30 || v.wR > sideTop - 30) msgs.push(['warn', `Flügel länger als ${num(sideTop - 30)} mm stoßen abgeklappt auf den Boden. Flügel kürzer machen.`]);
       if (E > 900) msgs.push(['warn', `Steckverlängerung ${num(E)} mm lang – besser linken Flügel länger machen oder einen Rollenbock statt Stützbein verwenden.`]);
@@ -1390,19 +1395,21 @@ const toolJigs = {
       const bL = brk(v.wL), bR = brk(v.wR);
       plan.kpis = [
         ['Arbeitshöhe', mm(wh)], ['Unterbau B × T', `${num(Bc)} × ${num(Tc)}`],
-        ['Deckplatte (Säge) auf', mm(deckTop)], ['Reiter-Versatz N', mm(N)],
+        adj ? ['Passende Säge-Tischhöhe', `${num(v.sH - aR / 2)} … ${num(v.sH + aR / 2)} mm`] : ['Deckplatte (Säge) auf', mm(deckTop)], ['Reiter-Versatz N', mm(N)],
         ['Längen mit Lehre', `${num(minL)} … ${num(v.Lmax)} mm`], ['Steckverlängerung', E ? mm(E) : 'nicht nötig'],
       ];
       msgs.push(['info', `So kommt die Lehre auf ihre Länge: Die Lehre liegt im Kanal ab dem Nullanschlag (${num(N)} mm vom Sägeblatt). Der Reiter hat seine Anschlagnase genau ${num(N)} mm vor seinem Taster – schiebst du den Taster ans Lehrenende, steht die Nase exakt auf der Lehrenlänge. Einmal mit Probeschnitt justieren.`]);
       if (v.sH < 60 || v.sH > 160) msgs.push(['warn', 'Tischhöhe der Säge ungewöhnlich – bitte nachmessen (Unterkante Grundplatte bis Auflagefläche).']);
+      if (adj) msgs.push(['info', `Höhenverstellbare Deckplatte: Jede Säge mit einer Tischhöhe zwischen ${num(v.sH - aR / 2)} und ${num(v.sH + aR / 2)} mm lässt sich bündig einstellen – die Tischhöhe muss also nicht aufs Millimeter stimmen.`]);
 
       const L = (name, qty, l, b, t, mat, note) => ({ name, qty, l, b, t, mat, note });
+      const nFeet = adj ? (Bi > 650 ? 6 : 4) : 0;
       const parts = [
         L('Bein', 4, legL, kb, kt, 'Kantholz', `Unterkante ${num(v.sRoll + foot)} über Boden`),
         L('Fußholm (flach, Rollen darunter)', 2, Tc, kb, kt, 'Kantholz', ''),
         L('Seitenriegel (oben / Deck / Boden)', 6, Tc - 2 * kt, kb, kt, 'Kantholz', '3 je Seite, zwischen die Beine'),
-        L('Querriegel vorne/hinten (Deck + Boden)', 4, Bi, kb, kt, 'Kantholz', `Deck-Riegel Oberkante ${num(deckTop - tw)} mm`),
-        L('Deckplatte (Säge)', 1, Bi, Tc - 2 * kt, tw, 'Multiplex/OSB', `Oberkante genau ${num(deckTop)} mm`),
+        L('Querriegel vorne/hinten (Deck + Boden)', 4, Bi, kb, kt, 'Kantholz', `Deck-Riegel Oberkante ${num(railTop)} mm`),
+        L('Deckplatte (Säge)', 1, adj ? Bi - 4 : Bi, Tc - 2 * kt - (adj ? 4 : 0), adj ? Math.max(tw, 21) : tw, 'Multiplex', adj ? `liegt auf ${nFeet} Stellfüßen, Oberkante ${num(deckTop - aR / 2)} … ${num(deckTop + aR / 2)} mm` : `Oberkante genau ${num(deckTop)} mm`),
         L('Ablageboden', 1, Bi, Tc - 2 * kt, tw, 'OSB', ''),
         L('Deckleiste (bündig Arbeitshöhe)', 2, Tc, kb + clad, tw, 'Multiplex', `Oberkante ${num(wh)} mm`),
         ...(clad ? [L('Seitenverkleidung', 2, Tc, sideTop - v.sRoll - foot, clad, 'OSB', 'außen auf die Seitenrahmen')] : []),
@@ -1433,22 +1440,24 @@ const toolJigs = {
         ['Holzschraube 5 × 80', 'ca. 60 Stk', 'Rahmen'],
         ['Holzschraube 4 × 40', 'ca. 80 Stk', 'Platten, Leisten'],
         ['Schlossschraube M8 × 60 + Mutter + U-Scheibe', '4 Stk', 'Säge auf der Deckplatte'],
+        ...(adj ? [['Stellfuß / Nivellierschraube M10, Gewinde ≥ ' + (aR + 30) + ' mm, mit Teller', `${nFeet} Stk`, 'Deckplatte höhenverstellbar'], ['Einschlagmutter M10 + Kontermutter M10', `${nFeet} + ${nFeet}`, 'Einschlagmutter von unten in die Deckplatte'], ['Winkel mit Langloch (senkrecht)', '2 Stk', 'Deckplatte gegen Verrutschen, Langloch lässt die Höhe frei']] : []),
         ['Sterngriffschraube M8 × 40 + Einschlagmutter M8', '1 Satz', 'Reiter klemmen'],
         ...(E ? [['Holzdübel Ø 10 + Kistenverschluss', '2 + 1', 'Steckverlängerung'], ['Stellfuß M8 + Klappscharnier', '1 + 1', 'Stützbein']] : []),
         ['Holzleim, Schleifpapier, Wachs', '–', 'Wachs auf Flügel und Kanal: Werkstück und Reiter gleiten besser'],
       ];
       plan.jigs = [
         ['Richtlatte (gerade Latte ≥ 1,5 m)', '–', 'Sägetisch → Deckleisten → Flügel bündig prüfen; Anschlagflucht'],
-        ['Abstandsklotz Deckhöhe', mm(deckTop - tw - v.sRoll - foot), 'Deck-Riegel ohne Messen einsetzen (Fußholm → Unterkante Riegel)'],
+        ['Abstandsklotz Deckhöhe', mm(railTop - kb - v.sRoll - foot), 'Deck-Riegel ohne Messen einsetzen (Fußholm → Unterkante Riegel)'],
         ['Probe-Lehre', '600 mm', 'zum Justieren des Reiters (z. B. eure Maßlatte 60,0)'],
       ];
       plan.steps = [
         `<b>Säge vermessen:</b> Tischhöhe (Unterkante Grundplatte → Auflagefläche) ${mm(v.sH)}, Grundplatte ${num(v.sB)} × ${num(v.sT)} mm, Sägeblatt-Zahn (linke Schnittkante) ${mm(v.sP)} ab linker Grundplattenkante. Diese Maße bestimmen alles – zweimal messen.`,
         `<b>Zuschnitt</b> laut Liste. Multiplex im Baumarkt schneiden lassen, Kantholz mit Anschlag kappen.`,
-        `<b>Seitenrahmen:</b> je 2 Beine (${mm(legL)}) mit 3 Seitenriegeln verschrauben: oben bündig, Deck-Riegel Oberkante ${mm(deckTop - tw)}, Boden-Riegel Oberkante ${mm(shelfTop - tw)} (alle Maße ab Boden auf Rollen). Unten den Fußholm flach unter die Beine.`,
+        `<b>Seitenrahmen:</b> je 2 Beine (${mm(legL)}) mit 3 Seitenriegeln verschrauben: oben bündig, Deck-Riegel Oberkante ${mm(railTop)}, Boden-Riegel Oberkante ${mm(shelfTop - tw)} (alle Maße ab Boden auf Rollen). Unten den Fußholm flach unter die Beine.`,
         `<b>Unterbau verbinden:</b> 4 Querriegel (${mm(Bi)}) vorne/hinten auf Deck- und Bodenhöhe. Diagonalen gleich lang? Dann Deckplatte und Ablageboden einlegen und verschrauben. Rollen unter die Fußholme.`,
         `<b>Deckleisten + Verkleidung:</b> ${clad ? `Seitenverkleidung (OSB ${clad} mm) außen aufschrauben, dann ` : ''}Deckleisten oben auf die Seitenrahmen – Oberkante genau Arbeitshöhe ${mm(wh)}.`,
-        `<b>Säge einsetzen:</b> Säge auf die Deckplatte stellen, Blatt-Zahn ${mm(v.sP + clr)} von der linken Bein-Innenseite. Richtlatte über Sägetisch und beide Deckleisten legen: muss überall aufliegen. Zu tief? Streifen unterlegen. Mit 4 Schlossschrauben M8 fixieren.`,
+        adj ? `<b>Deckplatte höhenverstellbar:</b> ${nFeet} Einschlagmuttern M10 von unten in die Deckplatte (über den Deck-Riegeln, ca. 60 mm von den Ecken${nFeet === 6 ? ' + 2 in der Mitte' : ''}), Stellfüße eindrehen und auf ca. ${mm(lift)} Abstand (Mittelstellung) stellen. Platte auf die Riegel legen, 2 Winkel mit senkrechtem Langloch gegen Verrutschen.` : `<b>Deckplatte:</b> auf die Deck-Riegel schrauben, Oberkante ${mm(deckTop)}.`,
+        `<b>Säge einsetzen:</b> Säge auf die Deckplatte stellen, Blatt-Zahn ${mm(v.sP + clr)} von der linken Bein-Innenseite, mit 4 Schlossschrauben M8 fixieren. Richtlatte über Sägetisch und beide Deckleisten legen. ${adj ? 'Stellfüße drehen, bis die Latte überall aufliegt – erst vorne beide, dann hinten. Kontermuttern fest, Langloch-Winkel anziehen.' : 'Zu tief? Streifen unterlegen.'}`,
         `<b>Flügel:</b> Mit Klavierband an die Außenkante der Deckleisten schrauben, Klappkonsolen (${bL} / ${bR} mm) darunter an die Seitenrahmen. Flügel hochklappen, Richtlatte: Flügel, Deckleisten und Sägetisch eine Ebene.`,
         `<b>Lehrenaufnahme (linker Flügel):</b> Richtlatte an den Sägeanschlag legen und bis über den Flügel verlängern – daran die Anschlagleiste ausrichten und verschrauben. Kanal-Rückwand mit ${mm(cw)} Abstand dahinter. Nullanschlag quer an den Kanalanfang: Außenseite genau ${mm(N)} vom Sägeblatt-Zahn.`,
         ...(E ? [`<b>Steckverlängerung:</b> Grundbrett ${mm(E + 150)} mit Anschlag + Rückwand in gleicher Flucht, 150 mm schiebt sich unter den Flügel (2 Dübel + Kistenverschluss). Stützbein mit Stellfuß auf Arbeitshöhe einstellen. Damit reicht der Kanal bis ${mm(d0 + v.wL + E)} – Lehren bis ${mm(v.Lmax)}.`] : []),
@@ -1467,7 +1476,8 @@ const toolJigs = {
       g += S.rect(0, Y(v.sRoll + foot), Bc, foot, 'class="wood2"');
       g += S.rect(0, Y(sideTop), kb, legL, 'class="wood2"') + S.rect(Bc - kb, Y(sideTop), kb, legL, 'class="wood2"');
       if (clad) g += S.rect(-0.1, Y(sideTop), clad, legL, 'fill="#e9dcc2" stroke="#8a7a60"') + S.rect(Bc - clad, Y(sideTop), clad, legL, 'fill="#e9dcc2" stroke="#8a7a60"');
-      g += S.rect(kb + clad, Y(deckTop - tw) , Bi, kb, 'class="wood"') + S.rect(kb + clad, Y(deckTop), Bi, tw, 'class="wood2"');
+      g += S.rect(kb + clad, Y(railTop), Bi, kb, 'class="wood"') + S.rect(kb + clad + 2, Y(deckTop), Bi - 4, tw, 'class="wood2"');
+      if (adj) [kb + clad + 60, Bc - kb - clad - 60].forEach(x => { g += S.rect(x - 8, Y(deckTop - tw), 16, lift, 'fill="#777"') + S.rect(x - 20, Y(railTop + 4), 40, 4, 'fill="#444"'); });
       g += S.rect(kb + clad, Y(shelfTop - tw), Bi, kb, 'class="wood"') + S.rect(kb + clad, Y(shelfTop), Bi, tw, 'class="wood2"');
       g += S.rect(0, Y(wh), kb + clad, tw, 'class="wood2"') + S.rect(Bc - kb - clad, Y(wh), kb + clad, tw, 'class="wood2"');
       // Säge
@@ -1521,9 +1531,9 @@ const toolJigs = {
       [[0, kb], [Bc - kb, Bc]].forEach(([a, b]) => {
         C(a, b, 0, Tc, v.sRoll, v.sRoll + foot, 'wood');
         [[0, kt], [Tc - kt, Tc]].forEach(([c0, c1]) => C(a, b, c0, c1, v.sRoll + foot, sideTop, 'wood'));
-        [sideTop, deckTop - tw, shelfTop - tw].forEach(zt => C(a, b, kt, Tc - kt, zt - kb, zt, 'wood'));
+        [sideTop, railTop, shelfTop - tw].forEach(zt => C(a, b, kt, Tc - kt, zt - kb, zt, 'wood'));
       });
-      [[0, kt], [Tc - kt, Tc]].forEach(([c0, c1]) => { C(kb, Bc - kb, c0, c1, deckTop - tw - kb, deckTop - tw, 'wood'); C(kb, Bc - kb, c0, c1, shelfTop - tw - kb, shelfTop - tw, 'wood'); });
+      [[0, kt], [Tc - kt, Tc]].forEach(([c0, c1]) => { C(kb, Bc - kb, c0, c1, railTop - kb, railTop, 'wood'); C(kb, Bc - kb, c0, c1, shelfTop - tw - kb, shelfTop - tw, 'wood'); });
       C(kb + clad, Bc - kb - clad, kt, Tc - kt, deckTop - tw, deckTop, 'osb'); C(kb + clad, Bc - kb - clad, kt, Tc - kt, shelfTop - tw, shelfTop, 'osb');
       if (clad) { C(-clad, 0, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); C(Bc, Bc + clad, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); }
       C(-clad, kb, 0, Tc, sideTop, wh, 'osb'); C(Bc - kb, Bc + clad, 0, Tc, sideTop, wh, 'osb');
