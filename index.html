@@ -1586,9 +1586,12 @@ const toolJigs = {
         C(kb + clad, Bc - kb - clad, kt, kt + zoneP, deckTopP - tw, deckTopP, 'osb');
         const px0 = (Bc - v.pL) / 2;
         C(px0, px0 + v.pL, kt + clr, kt + clr + v.pW, deckTopP, wh, '#9aa4ae');                       // Sockel + Tisch
-        C(px0, px0 + 70, kt + clr, kt + clr + v.pW, wh, wh + 420, '#2f2f2f'); C(px0 + v.pL - 70, px0 + v.pL, kt + clr, kt + clr + v.pW, wh, wh + 420, '#2f2f2f');
-        C(px0, px0 + v.pL, kt + clr, kt + clr + v.pW, wh + 420, wh + 470, '#c8ccd0');                // Deckel
-        C(px0 + 70, px0 + v.pL - 70, kt + clr + 60, kt + clr + v.pW - 60, wh + 160, wh + 300, '#2e7d4f'); // Motor
+        const py0 = kt + clr, py1 = kt + clr + v.pW;   // Säulen stehen vorne und hinten – der Durchlauf geht links → rechts
+        C(px0 + 60, px0 + v.pL - 60, py0, py0 + 110, wh, wh + 420, '#2f2f2f'); C(px0 + 60, px0 + v.pL - 60, py1 - 110, py1, wh, wh + 420, '#2f2f2f');
+        C(px0 + 40, px0 + v.pL - 40, py0, py1, wh + 420, wh + 470, '#c8ccd0');                       // Deckel
+        C(px0 + 90, px0 + v.pL - 90, py0 + 110, py1 - 110, wh + 190, wh + 300, '#2e7d4f');            // Motor/Messerwelle quer
+        C(px0 - 300, px0, py0 + 150, py1 - 150, wh + 2, wh + 30, '#e0b23a');                            // Brett läuft ein (links)
+        C(px0 + v.pL, px0 + v.pL + 300, py0 + 150, py1 - 150, wh + 2, wh + 30, '#e0b23a');              // … und rechts wieder aus
       }
       if (clad) { C(-clad, 0, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); C(Bc, Bc + clad, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); }
       C(-clad, kb, 0, Tc, sideTop, wh, 'osb'); C(Bc - kb, Bc + clad, 0, Tc, sideTop, wh, 'osb');
@@ -1602,7 +1605,7 @@ const toolJigs = {
       if (E) { C(xl - v.wL - E, xl - v.wL + 150, yF - chanW - 30, yF + 30, wh - 2 * tw, wh - tw, 'osb'); C(xl - v.wL - E, xl - v.wL, yF - 18, yF, wh - tw, wh + fenceH - tw, '#f6e3c4'); C(xl - v.wL - E + 20, xl - v.wL - E + 78, yF - 60, yF - 22, 0, wh - 2 * tw, 'wood'); }
       const rx1 = -(v.Lmax - bladeX);
       C(rx1 - N - 40, rx1, yF - chanW, yF + 30, wh + fenceH, wh + fenceH + 18, 'hi'); C(rx1 - 30, rx1, yF, yF + 30, wh + 20, wh + fenceH, 'hi');
-      const iso = iso3dSvg(cubes, { w: Bc, d: Tc }, 'vr', `3D-Ansicht: Unterbau auf Rollen, Säge auf der Deckplatte${planer ? ', Dickenhobel dahinter (quer, Flügel = Ein-/Auslauf)' : ''}, links Anschlag mit Lehrenkanal und Reiter (gelb).`, { noFloor: true });
+      const iso = iso3dSvg(cubes, { w: Bc, d: Tc }, 'vr', `3D-Ansicht: Unterbau auf Rollen, Säge auf der Deckplatte${planer ? ', Dickenhobel dahinter – Brett (gelb) läuft links → rechts hinter der Säge vorbei, die Flügel sind Ein- und Auslauf' : ''}, links Anschlag mit Lehrenkanal und Reiter (gelb).`, { noFloor: true });
       // --- Skala-Streifen je Flügel (Draufsicht, nur Bereich am Anschlag) ---
       const scaleViews = [];
       const scaleStrip = (side) => {
@@ -1659,15 +1662,19 @@ const toolJigs = {
         t += S.text(kt + clr + v.sT / 2, Y(wh + 30), 'Säge', `font-size="${f4 * 0.7}" text-anchor="middle"`);
         // Hobel (hinten)
         const px = 2 * kt + zoneS + clr;
-        t += S.rect(px, Y(wh), v.pW, v.pH, 'fill="#9aa4ae" stroke="#555"') + S.rect(px, Y(wh + 470), v.pW, 470, 'fill="none" stroke="#333"');
-        t += S.rect(px + 60, Y(wh + 300), v.pW - 120, 140, 'fill="#2e7d4f" stroke="#1f5536"');
-        t += S.text(px + v.pW / 2, Y(wh + 500), 'Dickenhobel (quer)', `font-size="${f4 * 0.7}" text-anchor="middle"`);
+        t += S.rect(px, Y(wh), v.pW, v.pH, 'fill="#9aa4ae" stroke="#555"');
+        t += S.rect(px, Y(wh + 420), 110, 420, 'fill="#2f2f2f"') + S.rect(px + v.pW - 110, Y(wh + 420), 110, 420, 'fill="#2f2f2f"');
+        t += S.rect(px, Y(wh + 470), v.pW, 50, 'fill="#c8ccd0" stroke="#555"');
+        t += S.rect(px + 110, Y(wh + 300), v.pW - 220, 110, 'fill="#2e7d4f" stroke="#1f5536"');
+        t += S.rect(px + 150, Y(wh + 30), v.pW - 300, 28, 'fill="#e0b23a" stroke="#7a5a00"');
+        t += S.text(px + v.pW / 2, Y(wh + 500), 'Dickenhobel – Blick in den Durchlauf', `font-size="${f4 * 0.6}" text-anchor="middle"`);
+        t += S.text(px + v.pW / 2, Y(wh + 60), 'Brett (läuft auf dich zu)', `font-size="${f4 * 0.45}" text-anchor="middle"`);
         t += S.line(-60, Y(wh), Tc + 60, Y(wh), 'stroke="#c2410c" stroke-dasharray="10 6"');
         t += S.text(Tc + 70, Y(wh) + 6, `Arbeitshöhe ${num(wh)}`, `font-size="${f4 * 0.6}" fill="#c2410c"`);
         t += dimH(kt, kt + zoneS, Y(-120), `Säge-Fach ${num(zoneS)}`, f4 * 0.7) + dimH(2 * kt + zoneS, Tc - kt, Y(-120), `Hobel-Fach ${num(zoneP)}`, f4 * 0.7);
         t += dimH(0, Tc, Y(-280), `Tiefe ${num(Tc)}`, f4 * 0.8);
         t += S.text(0, Y(-360), '◄ vorne (Bedienseite Säge)', `font-size="${f4 * 0.55}" class="lbl"`);
-        side = drawing(-f4 * 2, Y(wh + 600), Tc + f4 * 9, wh + 600 + 420, t, 'Seitenansicht von links: Säge vorne, Dickenhobel dahinter auf eigener höhenverstellbarer Platte. Beide Tische liegen auf Arbeitshöhe; die Flügel reichen über die ganze Tiefe.');
+        side = drawing(-f4 * 2, Y(wh + 600), Tc + f4 * 9, wh + 600 + 420, t, 'Seitenansicht von links: Säge vorne, Dickenhobel dahinter auf eigener höhenverstellbarer Platte. Beim Hobel siehst du direkt in den Durchlauf – das Brett läuft links → rechts hinter der Säge vorbei, nicht auf sie zu. Beide Tische auf Arbeitshöhe, die Flügel reichen über die ganze Tiefe.');
       }
       plan.drawings = [iso, front, ...(side ? [side] : []), ...scaleViews, reiter];
 
