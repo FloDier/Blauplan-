@@ -1701,6 +1701,7 @@ function registerInter(doc) {
   return true;
 }
 async function deliverPdf(doc, name) {
+  name = name.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue').replace(/ß/g, 'ss').replace(/[^\w.-]+/g, '-').replace(/-+/g, '-');
   const blob = doc.output('blob');
   const file = new File([blob], name, { type: 'application/pdf' });
   let shared = false;
@@ -2072,6 +2073,179 @@ async function exportRegalPdf(tool, root, btn) {
 }
 
 toolRegal.printPdf = exportRegalPdf;
+
+/* =====================================================================
+   Heft-Bauplan für alle übrigen Tools (French Cleat, Schienen & Schablonen)
+   Gleicher Stil wie der Regal-Bauplan: Inter, Schwarz-Weiß, je Thema eine Seite
+   ===================================================================== */
+async function exportHeftPdf(tool, root, btn) {
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Bauplan wird gesetzt …'; }
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:900px;overflow:hidden';
+  document.body.appendChild(host);
+  try {
+    await loadPdfLibs();
+    const plan = tool.compute(values(tool));
+    if (plan.fatal) throw new Error('Die Planung hat Fehler – bitte zuerst die roten Hinweise beheben.');
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const hasInter = registerInter(doc);
+    const F = { r: hasInter ? ['Inter', 'normal'] : ['helvetica', 'normal'], b: hasInter ? ['Inter', 'bold'] : ['helvetica', 'bold'], xb: hasInter ? ['InterXB', 'normal'] : ['helvetica', 'bold'] };
+    const T = s => hasInter ? String(s) : pdfTxt(s);
+    const ML = 16, W = 210 - 32, TOP = 16, BOT = 280;
+    const INK = [24, 24, 24], GREY = [120, 120, 120], LINE = [210, 210, 210];
+    const date = new Date().toLocaleDateString('de-DE');
+    const unit = tool.unit === 'cm' ? 'cm' : 'mm';
+    const fmt = x => unit === 'cm' ? (Math.round(x) / 10).toFixed(1).replace('.', ',') : num(x);
+    const strip = html => { const d = document.createElement('div'); d.innerHTML = html; return d.textContent.replace(/\s+/g, ' ').trim(); };
+    let y = TOP, pageTitle = '', first = true;
+    const font = (f, size, col = INK) => { doc.setFont(...F[f]); doc.setFontSize(size); doc.setTextColor(...col); };
+    const write = (txt, x, yy, f, size, opt = {}) => { font(f, size, opt.col); doc.text(T(txt), x, yy, opt); };
+    const rule = (yy, wdt = 0.5, col = INK) => { doc.setDrawColor(...col); doc.setLineWidth(wdt); doc.line(ML, yy, ML + W, yy); };
+    const newPage = title => {
+      if (!first) doc.addPage(); first = false;
+      pageTitle = title; y = TOP;
+      if (title) { write(title, ML, y + 9, 'xb', 25); rule(y + 13); y += 19; }
+    };
+    const need = h => { if (y + h > BOT) newPage(pageTitle.endsWith('(Forts.)') ? pageTitle : pageTitle + ' (Forts.)'); };
+    const para = (txt, f = 'r', size = 9, col = INK, gap = 2, x = ML, w = W) => {
+      font(f, size, col);
+      const lh = size * 0.3528 * 1.42;
+      doc.splitTextToSize(T(txt), w).forEach(l => { need(lh); doc.text(l, x, y + lh * 0.75); y += lh; });
+      y += gap;
+    };
+    const table = (cols, rows) => {
+      const xs = []; let acc = ML; cols.forEach(c => { xs.push(acc); acc += c.w * W; });
+      const head = () => { need(9); cols.forEach((c, i) => write(c.h, xs[i] + 1, y + 4, 'r', 7, { col: GREY })); y += 5.5; rule(y, 0.45); y += 0.5; };
+      head();
+      rows.forEach(r => {
+        const cells = r.map((c, i) => { font(i === 0 ? 'b' : 'r', i === 0 ? 8.8 : 8.2); return doc.splitTextToSize(T(c == null ? '' : c), cols[i].w * W - 2.5); });
+        const rh = Math.max(7, Math.max(...cells.map(c => c.length)) * 3.5 + 3.4);
+        if (y + rh > BOT) { newPage(pageTitle.endsWith('(Forts.)') ? pageTitle : pageTitle + ' (Forts.)'); head(); }
+        cells.forEach((c, i) => { font(i === 0 ? 'b' : 'r', i === 0 ? 8.8 : 8.2); c.forEach((l, j) => doc.text(l, xs[i] + 1, y + 4.5 + j * 3.5)); });
+        y += rh; rule(y, 0.15, LINE);
+      });
+      y += 4;
+    };
+    const putSvg = async (svg, x, yy, maxW, maxH, mono) => {
+      const vb = svg.viewBox.baseVal;
+      let w = maxW, h = maxW * vb.height / vb.width;
+      if (h > maxH) { h = maxH; w = h * vb.width / vb.height; }
+      await doc.svg(prepSvg(svg, w, { family: hasInter ? 'Inter' : 'helvetica', mono }), { x: x + (maxW - w) / 2, y: yy, width: w, height: h });
+      return h;
+    };
+    const out = root.querySelector('.out');
+    const figs = [...out.querySelectorAll('figure.drw')];
+    const drawFigs = figs.slice(0, (plan.drawings || []).length), cutFigs = figs.slice((plan.drawings || []).length);
+    const title = plan.title;
+
+    // ===== 1 · Titel =====
+    newPage('');
+    font('b', 7.5); doc.text(T(`BAUPLAN · ${tool.title.toUpperCase()} · ${date}`), ML, y + 4, { charSpace: 0.9 });
+    y += 9;
+    font('xb', 38);
+    doc.splitTextToSize(T(title.toLowerCase()), W).forEach(l => { doc.text(l, ML - 1, y + 13); y += 14.5; });
+    y += 2;
+    para(`Selbstbau-Plan · Maße in ${unit}`, 'r', 10.5, INK, 3);
+    rule(y, 0.5); y += 6;
+    const coverFig = drawFigs.find(f => f.classList.contains('iso')) || drawFigs[0];
+    if (coverFig) y += await putSvg(coverFig.querySelector('svg'), ML, y, W, 140, true) + 8;
+    // Kennzahlen groß
+    const k = (plan.kpis || []).slice(0, 6);
+    const cw = W / 3;
+    k.forEach((kv, i) => {
+      const col = i % 3; if (col === 0 && i) y += 17;
+      const x = ML + col * cw;
+      font('xb', 15); const lines = doc.splitTextToSize(T(kv[1]), cw - 4);
+      write(lines[0], x, y + 7, 'xb', 15);
+      write(kv[0], x, y + 12, 'r', 7.5, { col: GREY });
+    });
+    y += 20;
+
+    // ===== 2 · Material =====
+    if ((plan.parts && plan.parts.length) || (plan.buy && plan.buy.length)) {
+      newPage('Material');
+      if (plan.parts && plan.parts.length) {
+        write('Zuschnitt', ML, y + 4, 'xb', 12); y += 8;
+        table([{ h: 'Teil', w: 0.34 }, { h: 'Stk', w: 0.07 }, { h: `Länge`, w: 0.1 }, { h: 'Breite', w: 0.1 }, { h: 'Stärke', w: 0.09 }, { h: 'Material / Hinweis', w: 0.3 }],
+          plan.parts.map(p => [p.name, String(p.qty), p.l != null ? fmt(p.l) : '–', p.b != null ? fmt(p.b) : '–', p.t != null ? fmt(p.t) : '–', [p.mat, p.note].filter(Boolean).join(' · ')]));
+        para(`Alle Maße in ${unit}.`, 'r', 7.5, GREY);
+      }
+      if (plan.buy && plan.buy.length) { need(20); write('Einkauf', ML, y + 4, 'xb', 12); y += 8; table([{ h: 'Menge', w: 0.18 }, { h: 'Artikel', w: 0.42 }, { h: 'Wofür', w: 0.4 }], plan.buy.map(r => [r[1], r[0], r[2]])); }
+      if (plan.jigs && plan.jigs.length) { need(20); write('Lehren & Hilfsmittel', ML, y + 4, 'xb', 12); y += 8; table([{ h: 'Lehre', w: 0.3 }, { h: 'Maß', w: 0.18 }, { h: 'Wofür', w: 0.52 }], plan.jigs.filter(j => j[0] || j[2])); }
+    }
+    // ===== 3 · Zuschnittplan (falls vorhanden) =====
+    if (plan.cutplan && cutFigs.length) {
+      newPage('Zuschnitt');
+      const d = document.createElement('div'); d.innerHTML = plan.cutplan;
+      let fi = 0;
+      for (const el of [...d.children]) {
+        if (el.tagName === 'P') para(el.textContent, 'r', 9);
+        else if (el.tagName === 'FIGURE' && cutFigs[fi]) { const svg = cutFigs[fi++].querySelector('svg'); const vb = svg.viewBox.baseVal; need(Math.min(120, W * vb.height / vb.width) + 4); y += await putSvg(svg, ML, y, W, 120, true) + 4; }
+      }
+    }
+    // ===== 4 · Zeichnungen =====
+    if (drawFigs.length) {
+      newPage('Zeichnungen');
+      for (const f of drawFigs) {
+        if (f === coverFig && f.classList.contains('iso')) continue;
+        const svg = f.querySelector('svg'), vb = svg.viewBox.baseVal;
+        const h = Math.min(150, W * vb.height / vb.width);
+        if (y + h + 14 > BOT) newPage('Zeichnungen (Forts.)');
+        y += await putSvg(svg, ML, y, W, 150, true) + 2;
+        const cap = f.querySelector('figcaption'); if (cap) para(cap.textContent, 'r', 7.8, GREY, 5);
+      }
+    }
+    // ===== 5 · Aufbau =====
+    if (plan.steps && plan.steps.length) {
+      newPage('Aufbau');
+      plan.steps.forEach((st, i) => {
+        const d = document.createElement('div'); d.innerHTML = st;
+        const b = d.querySelector('b'); const head = b ? b.textContent.replace(/:$/, '') : '';
+        if (b) b.remove();
+        const body = d.textContent.replace(/^\s*:?\s*/, '').trim();
+        font('r', 9); const lines = doc.splitTextToSize(T(body), W - 16);
+        need(10 + lines.length * 4.6);
+        write(String(i + 1), ML, y + 8, 'xb', 20);
+        if (head) write(head, ML + 14, y + 5.5, 'b', 11);
+        y += head ? 8 : 2;
+        para(body, 'r', 9, INK, 4, ML + 14, W - 14);
+        rule(y - 2, 0.15, LINE); y += 2;
+      });
+    }
+    // ===== 6 · Hinweise =====
+    if (plan.msgs && plan.msgs.length) {
+      newPage('Hinweise & Sicherheit');
+      plan.msgs.forEach(m => para((m[0] === 'err' ? 'Fehler: ' : m[0] === 'warn' ? 'Achtung: ' : '') + m[1], m[0] === 'info' ? 'r' : 'b', 9, m[0] === 'err' ? [150, 30, 30] : INK, 2.5));
+      y += 4;
+      para('Dieser Bauplan ist eine Anleitung für den Eigenbau, erzeugt mit der Bauplan App. Maße, Tragfähigkeit und Sicherheit hängen von Material, Ausführung und Maschine ab und sind vom Nachbauer zu prüfen. Vor dem ersten Einsatz Probeschnitt bzw. Probelauf machen. Keine Haftung für Schäden aus dem Nachbau.', 'r', 7, GREY);
+    }
+    // ===== 7 · Schablonen 1:1 =====
+    for (const tile of out.querySelectorAll('.tpls svg.tile')) {
+      doc.addPage();
+      await doc.svg(prepSvg(tile, 180, { family: hasInter ? 'Inter' : 'helvetica' }), { x: 15, y: 12, width: 180, height: 255 });
+    }
+    // Fußzeilen
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i);
+      doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(ML, 286, ML + W, 286);
+      write(`${title} · Bauplan ${date}`, ML, 290.5, 'r', 7, { col: GREY });
+      write(`${i} / ${n}`, ML + W, 290.5, 'r', 7, { col: GREY, align: 'right' });
+    }
+    await deliverPdf(doc, `Bauplan-${title.replace(/[^\wäöüÄÖÜß-]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  } catch (e) {
+    console.error(e);
+    alert('PDF konnte nicht erstellt werden: ' + (e && e.message ? e.message : e));
+  } finally {
+    host.remove();
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+toolCleat.printPdf = exportHeftPdf;
+toolJigs.printPdf = exportHeftPdf;
+
 
 async function exportPdf(tool, root, btn) {
   const label = btn ? btn.textContent : '';
