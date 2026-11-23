@@ -1255,8 +1255,10 @@ const toolJigs = {
     { g: 'Tisch', id: 'wR', label: 'Flügel rechts', def: 600, unit: 'mm', show: isJig('saw') },
     { g: 'Tisch', id: 'stw', label: 'Plattenstärke', def: 18, unit: 'mm', show: isJig('saw') },
     { g: 'Tisch', id: 'sclad', label: 'Seitenverkleidung OSB', def: 12, unit: 'mm', help: '0 = ohne', show: isJig('saw') },
-    { g: 'Tisch', id: 'skb', label: 'Kantholz Breite', def: 58, unit: 'mm', show: isJig('saw') },
-    { g: 'Tisch', id: 'skt', label: 'Kantholz Stärke', def: 38, unit: 'mm', show: isJig('saw') },
+    { g: 'Tisch', id: 'skb', label: 'Kantholz Breite (nach vorne)', def: 50, unit: 'mm', help: 'Standard 5 × 10 cm, schmale Seite vorne', show: isJig('saw') },
+    { g: 'Tisch', id: 'skt', label: 'Kantholz Tiefe', def: 100, unit: 'mm', show: isJig('saw') },
+    { g: 'Lochraster', id: 'sDogs', label: 'Lochraster Ø 20 auf', type: 'select', def: 'both', options: [['both', 'beiden Flügeln'], ['left', 'nur links'], ['right', 'nur rechts'], ['none', 'keinem Flügel']], show: isJig('saw') },
+    { g: 'Lochraster', id: 'sDogR', label: 'Raster', def: 96, unit: 'mm', help: '96 = üblich für Bankhaken/MFT-Zubehör', show: v => v.jig === 'saw' && v.sDogs !== 'none' },
     { g: 'Hobel dahinter', id: 'sPlaner', label: 'Arbeitsplatz hinter der Säge', type: 'select', def: 'back', options: [['back', 'Dickenhobel dahinter'], ['none', 'kein zweiter Arbeitsplatz']], show: isJig('saw') },
     { g: 'Hobel dahinter', id: 'sRail', label: 'Platz hinter der Säge-Grundplatte', def: 200, unit: 'mm', help: 'Zugrohre ganz nach hinten geschoben messen!', show: v => v.jig === 'saw' && v.sPlaner === 'back' },
     { g: 'Hobel dahinter', id: 'pW', label: 'Hobel Breite (quer zum Durchlauf)', def: 579, unit: 'mm', help: 'DH 330: 579 laut Metabo', show: v => v.jig === 'saw' && v.sPlaner === 'back' },
@@ -1388,7 +1390,7 @@ const toolJigs = {
       const railTop = deckTop - tw - lift;               // Oberkante Deck-Riegel (fest)
       const deckTopP = wh - v.pH, railTopP = deckTopP - tw - lift;   // Hobel-Fach
       const sideTop = wh - tw;                           // Oberkante Seitenrahmen, darauf Deckleiste (bündig)
-      const foot = kt;                                   // Fußholm liegt flach
+      const foot = Math.min(kb, kt);                     // Fußholm liegt flach
       const legL = sideTop - v.sRoll - foot;
       const shelfTop = v.sRoll + foot + 180;
       const bladeX = kb + clad + clr + v.sP;             // Sägeblatt (Zahn, linke Schnittkante) ab linker Außenkante
@@ -1403,6 +1405,17 @@ const toolJigs = {
       const dR = Bc + 2 - (bladeX + v.sKerf);           // rechte Schnittkante → Innenkante rechter Flügel
       const slotOff = 25;                               // Mitte Langloch vor der Anschlagfläche
       const stopL = 2 * slotOff + 20;                   // Anschlagklotz: Breite quer zum Anschlag
+      // Lochraster: hinter Anschlagleiste/Kanal, Randabstand ≥ halbes Raster
+      const dgL = v.sDogs === 'both' || v.sDogs === 'left', dgR = v.sDogs === 'both' || v.sDogs === 'right', R96 = Math.max(60, v.sDogR || 96);
+      const dogGrid = (wLen, left) => {
+        const y0 = v.sFy + (left ? chanW : 18) + 40, y1 = Tc - 40;     // ab Vorderkante gemessen
+        const nx = Math.max(0, Math.floor((wLen - 2 * 48) / R96) + 1), ny = Math.max(0, Math.floor((y1 - y0) / R96) + 1);
+        const ox = (wLen - (nx - 1) * R96) / 2, oy = y0 + ((y1 - y0) - (ny - 1) * R96) / 2;
+        const pts = []; for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) pts.push([ox + i * R96, oy + j * R96]);
+        return { pts, nx, ny, y0 };
+      };
+      const gL = dgL ? dogGrid(v.wL, true) : { pts: [] }, gR = dgR ? dogGrid(v.wR, false) : { pts: [] };
+      const nDogs = gL.pts.length + gR.pts.length;
       if (planer && railTopP < shelfTop + 150) msgs.push(['err', `Hobeltisch zu hoch für diese Arbeitshöhe – Hobelplatte läge bei ${num(deckTopP)} mm.`]);
       if (planer) {
         msgs.push(['info', `Hobel hinter der Säge: Er wird quer eingebaut (Durchlauf links → rechts), die Flügel sind seine Ein- und Auslauftische. Seine eigenen Klapptische abnehmen oder einklappen. Hobeltisch und Flügel liegen bündig auf ${num(wh)} mm – Stellfüße gleichen ${num(v.pH - aR / 2)} … ${num(v.pH + aR / 2)} mm Tischhöhe aus.`]);
@@ -1423,6 +1436,7 @@ const toolJigs = {
         adj ? ['Passende Säge-Tischhöhe', `${num(v.sH - aR / 2)} … ${num(v.sH + aR / 2)} mm`] : ['Deckplatte (Säge) auf', mm(deckTop)], ['Reiter-Versatz N', mm(N)],
         ['Längen mit Lehre', `${num(minL)} … ${num(v.Lmax)} mm`], ['Steckverlängerung', E ? mm(E) : 'nicht nötig'],
         ...(scL ? [['Maßband links beginnt bei', mm(d0)]] : []), ...(scR ? [['Maßband rechts beginnt bei', mm(dR)]] : []),
+        ...(nDogs ? [['Lochraster Ø 20', `${nDogs} Löcher, ${num(R96)} mm`]] : []),
       ];
       msgs.push(['info', `So kommt die Lehre auf ihre Länge: Die Lehre liegt im Kanal ab dem Nullanschlag (${num(N)} mm vom Sägeblatt). Der Reiter hat seine Anschlagnase genau ${num(N)} mm vor seinem Taster – schiebst du den Taster ans Lehrenende, steht die Nase exakt auf der Lehrenlänge. Einmal mit Probeschnitt justieren.`]);
       if (v.sH < 60 || v.sH > 160) msgs.push(['warn', 'Tischhöhe der Säge ungewöhnlich – bitte nachmessen (Unterkante Grundplatte bis Auflagefläche).']);
@@ -1476,6 +1490,7 @@ const toolJigs = {
         ...(adj ? [['Stellfuß / Nivellierschraube M10, Gewinde ≥ ' + (aR + 30) + ' mm, mit Teller', `${nFeet + nFeetP} Stk`, planer ? 'Säge- und Hobelplatte höhenverstellbar' : 'Deckplatte höhenverstellbar'], ['Einschlagmutter M10 + Kontermutter M10', `${nFeet + nFeetP} + ${nFeet + nFeetP}`, 'Einschlagmutter von unten in die Deckplatte'], ['Winkel mit Langloch (senkrecht)', '2 Stk', 'Deckplatte gegen Verrutschen, Langloch lässt die Höhe frei']] : []),
         ['Sterngriffschraube M8 × 40 + Einschlagmutter M8', '1 Satz', 'Reiter klemmen'],
         ...(E ? [['Holzdübel Ø 10 + Kistenverschluss', '2 + 1', 'Steckverlängerung'], ['Stellfuß M8 + Klappscharnier', '1 + 1', 'Stützbein']] : []),
+        ...(nDogs ? [['Forstnerbohrer Ø 20 mm (scharf, mit Zentrierspitze)', '1', `${nDogs} Löcher – mit Opferplatte unterlegen`], ['Rundholz / Dübelstab Ø 20 mm', '30 cm', '2 Indexstifte für die Bohrschablone'], ['Bankhaken / Bankhunde Ø 20 mm', '2–4 Stk', 'zum Spannen auf den Flügeln']] : []),
         ...(scL ? [['Maßband selbstklebend, rechts → links lesend', `≥ ${Math.ceil((d0 + v.wL + E) / 1000)} m`, `links: an der Flügelkante muss ${num(d0)} mm stehen, Rest abschneiden`]] : []),
         ...(scR ? [['Maßband selbstklebend, links → rechts lesend', `≥ ${Math.ceil((dR + v.wR) / 1000)} m`, `rechts: an der Flügelkante muss ${num(dR)} mm stehen`]] : []),
         ...((scL || scR) ? (tnut ? [['Alu-T-Nutschiene 19 mm', `${scL ? '1 × ' + (Math.ceil((v.wL - 60) / 100) * 100) + ' mm' : ''}${scL && scR ? ' + ' : ''}${scR ? '1 × ' + (Math.ceil((v.wR - 60) / 100) * 100) + ' mm' : ''}${scL && E ? ' + 1 × ' + Math.ceil(E / 100) * 100 + ' mm' : ''}`, 'bündig einlassen (Nut mit Oberfräse)'], ['T-Nutschraube M6/M8 + Sterngriff', `${(scL ? 1 : 0) + (scR ? 1 : 0)} Satz`, 'Anschlagklotz']]
@@ -1504,6 +1519,7 @@ const toolJigs = {
           `<b>Anschlagklotz:</b> Hartholzklotz 60 × ${mm(stopL)}, ${tnut ? 'T-Nutschraube' : 'Schlossschraube M8 von unten durch Flügel und Klotz'}, Sterngriff ${tnut ? 'oben' : 'unter dem Flügel'}. Die Anschlagfläche ist die Ablesekante – mit einem Strich markieren.`,
           `<b>Maßband ausrichten – erst testen, dann kleben:</b> ${scL ? `Links ein rechts→links-Band so auflegen, dass an der Flügel-Innenkante ${mm(d0)} steht. ` : ''}${scR ? `Rechts ein links→rechts-Band mit ${mm(dR)} an der Flügel-Innenkante. ` : ''}Mit Malerkrepp fixieren, Anschlag auf z. B. 500 mm stellen, Probeschnitt, nachmessen, Band um die Abweichung verschieben. Erst dann die Schutzfolie abziehen und kleben. Das Band liegt vor dem Langloch, gut lesbar.`,
         ] : []),
+        ...(nDogs ? [`<b>Lochraster bohren:</b> Bohrschablone (Multiplex-Leiste mit 3 Löchern Ø 20 im ${num(R96)}-mm-Raster, Vorlage 1:1 unten) bauen – die Löcher senkrecht mit Bohrständer oder Bohrführung bohren. Erstes Loch laut Zeichnung anreißen und bohren, dann Schablone mit einem Indexstift ins fertige Loch stecken und das nächste durch die Schablone bohren – so wandert das Raster ohne Messen über den Flügel. Opferplatte unterlegen, Lochkanten mit Schleifpapier leicht anfasen. Das Raster liegt hinter Anschlagleiste und Kanal; vorne bleiben Langloch und Maßband frei.`] : []),
         `<b>Reiter bauen:</b> Deckleiste ${mm(N + 40)} lang. Am einen Ende der Taster (greift in den Kanal), am anderen Ende die Anschlagnase (vor der Anschlagleiste, mit Langloch) – Abstand Taster-Anlagefläche → Nasen-Anschlagfläche genau ${mm(N)} (Schablone 1:1 unten). Hinten die Klemmwange mit Sterngriff.`,
         `<b>Justieren:</b> Probe-Lehre (600 mm) mit dem Endanschlag an den Nullanschlag in den Kanal legen, Reiter mit dem Taster ans Lehrenende schieben, klemmen. Probestück an die Nase, schneiden, messen. Abweichung über das Langloch der Nase korrigieren – gilt danach für jede Lehre.`,
         `<b>Benutzen:</b> Lehre einlegen → Reiter ans Lehrenende → klemmen → Lehre herausnehmen (oder liegen lassen, sie stört hinter der Anschlagleiste nicht) → Werkstück an die Nase, festhalten, sägen. Kürzer als ${mm(minL)}: direkt am Sägeanschlag anzeichnen. Rollen vorher feststellen.`,
@@ -1608,6 +1624,23 @@ const toolJigs = {
       const iso = iso3dSvg(cubes, { w: Bc, d: Tc }, 'vr', `3D-Ansicht: Unterbau auf Rollen, Säge auf der Deckplatte${planer ? ', Dickenhobel dahinter – Brett (gelb) läuft links → rechts hinter der Säge vorbei, die Flügel sind Ein- und Auslauf' : ''}, links Anschlag mit Lehrenkanal und Reiter (gelb).`, { noFloor: true });
       // --- Skala-Streifen je Flügel (Draufsicht, nur Bereich am Anschlag) ---
       const scaleViews = [];
+      if (nDogs) {
+        const gap = 120, Wt = v.wL + gap + Bc + gap + v.wR, f5 = Math.max(Wt, Tc) / 40;
+        const wing = (x, wLen, g, left) => {
+          let t = S.rect(x, 0, wLen, Tc, 'class="wood"');
+          const fy = Tc - v.sFy;                         // y in der Zeichnung: 0 = hinten, Tc = vorne
+          if (left ? scL || true : scR) t += S.rect(x, fy - 18, wLen, 18, 'fill="#f6e3c4" stroke="#6b4a1f"');
+          if (left) t += S.rect(x, fy - chanW, wLen, 18, 'fill="#f6e3c4" stroke="#6b4a1f"');
+          if (left ? scL : scR) { t += S.rect(x + 40, fy + slotOff - 4, wLen - 80, 8.5, 'fill="#333"') + S.rect(x, fy + slotOff + 16, wLen, 26, 'fill="#fde68a" stroke="#a16207"'); }
+          g.pts.forEach(([px, py]) => { const cx = left ? x + wLen - px : x + px; t += S.circle(cx, Tc - py, 10, 'fill="#fff" stroke="#333"'); });
+          t += S.text(x + wLen / 2, Tc + f5 * 1.3, left ? 'linker Flügel' : 'rechter Flügel', `font-size="${f5 * 0.7}" text-anchor="middle" font-weight="700"`);
+          return t;
+        };
+        let t = wing(0, v.wL, dgL ? gL : { pts: [] }, true) + S.rect(v.wL + gap, 0, Bc, Tc, 'fill="#eee" stroke="#999" stroke-dasharray="8 6"') + S.text(v.wL + gap + Bc / 2, Tc / 2, 'Unterbau', `font-size="${f5 * 0.7}" text-anchor="middle" class="lbl"`) + wing(v.wL + gap + Bc + gap, v.wR, dgR ? gR : { pts: [] }, false);
+        if (gL.pts.length) { const [px, py] = gL.pts[gL.pts.length - 1]; t += dimH(v.wL - px, v.wL - px + R96, Tc - py + f5 * 1.6, num(R96), f5 * 0.6); }
+        t += S.text(0, -f5 * 0.6, '▲ hinten (Hobel-Durchlauf)', `font-size="${f5 * 0.55}" class="lbl"`) + S.text(0, Tc + f5 * 2.6, '▼ vorne: Anschlagleiste, Langloch, Maßband', `font-size="${f5 * 0.55}" class="lbl"`);
+        scaleViews.push(drawing(-f5, -f5 * 1.8, Wt + 2 * f5, Tc + f5 * 5, t, `Flügel von oben mit Lochraster Ø 20 im ${num(R96)}-mm-Raster (${nDogs} Löcher). Vorne Anschlagleiste, Langloch und Maßband, dahinter die Löcher für Bankhaken und Zwingen.`));
+      }
       const scaleStrip = (side) => {
         const left = side === 'L';
         const start = left ? d0 : dR, len = left ? v.wL + E : v.wR;
@@ -1686,6 +1719,13 @@ const toolJigs = {
       b += S.text(32, 7, `Nasen-Anschlagfläche`, 'font-size="3" fill="#c00"') + S.text(rl - 42, 7, `Taster-Anlagefläche – Abstand ${num(N)} mm`, 'font-size="3" fill="#c00" text-anchor="end"');
       b += holeMark(15, 28 + fenceH / 2, 8) + S.text(15, 28 + fenceH + 6, 'Langloch 8 × 20', 'font-size="2.8" text-anchor="middle"');
       plan.templates = [{ title: `Reiter 1:1 – Versatz N = ${num(N)} mm`, w: rl + 4, h: fenceH + 40, body: b, hint: 'auf die Reiter-Deckleiste kleben, Taster und Nase an den roten Linien setzen' }];
+      if (nDogs) {
+        const sl = 2 * R96 + 80;
+        let db = S.rect(0, 10, sl, 60, 'fill="none" stroke="#000" stroke-width="0.35"');
+        [40, 40 + R96, 40 + 2 * R96].forEach((x, i) => { db += holeMark(x, 40, 20); db += S.text(x, 64, i === 0 ? 'Indexstift' : 'bohren', 'font-size="3" text-anchor="middle"'); });
+        db += S.text(2, 7, `Bohrschablone Lochraster – Löcher Ø 20, Abstand ${num(R96)} mm (genau prüfen!)`, 'font-size="3"');
+        plan.templates.push({ title: `Bohrschablone Lochraster ${num(R96)} mm`, w: sl + 2, h: 76, body: db, hint: 'auf eine Multiplex-Leiste kleben, mit Bohrständer bohren' });
+      }
     }
 
     return plan;
