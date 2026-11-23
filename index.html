@@ -1546,27 +1546,54 @@ const toolJigs = {
       r += S.text(rl - 20, 18 + fenceH + 20 + f2, 'Taster', `font-size="${f2 * 0.65}" text-anchor="middle"`) + S.text(15, 18 + fenceH + 20 + f2 + 20, 'Nase', `font-size="${f2 * 0.65}" text-anchor="middle"`);
       const reiter = drawing(-230, -f2 * 3, rl + 520, fenceH + 18 + 80 + f2 * 4, r, 'Reiter von vorne: Nasen-Anschlagfläche und Taster-Anlagefläche liegen genau N auseinander.');
 
-      // --- 3D ---
-      const cubes = [], C = (x0, x1, y0, y1, z0, z1, c) => cubes.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), y0: Math.min(y0, y1), y1: Math.max(y0, y1), z0, z1, c });
+      // --- 3D --- (jedes Teil mit Baugruppe g, daraus entstehen auch die Schrittbilder)
+      const cubes = [];
+      let G0 = '';
+      const C = (x0, x1, y0, y1, z0, z1, c) => cubes.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), y0: Math.min(y0, y1), y1: Math.max(y0, y1), z0, z1, c, g: G0 });
       [[0, kb], [Bc - kb, Bc]].forEach(([a, b]) => {
+        G0 = 'side';
         C(a, b, 0, Tc, v.sRoll, v.sRoll + foot, 'wood');
         [[0, kt], [Tc - kt, Tc]].forEach(([c0, c1]) => C(a, b, c0, c1, v.sRoll + foot, sideTop, 'wood'));
         [sideTop, railTop, shelfTop - tw].forEach(zt => C(a, b, kt, Tc - kt, zt - kb, zt, 'wood'));
       });
+      G0 = 'cross';
       [[0, kt], [Tc - kt, Tc]].forEach(([c0, c1]) => { C(kb, Bc - kb, c0, c1, railTop - kb, railTop, 'wood'); C(kb, Bc - kb, c0, c1, shelfTop - tw - kb, shelfTop - tw, 'wood'); });
-      C(kb + clad, Bc - kb - clad, kt, Tc - kt, deckTop - tw, deckTop, 'osb'); C(kb + clad, Bc - kb - clad, kt, Tc - kt, shelfTop - tw, shelfTop, 'osb');
-      if (clad) { C(-clad, 0, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); C(Bc, Bc + clad, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); }
-      C(-clad, kb, 0, Tc, sideTop, wh, 'osb'); C(Bc - kb, Bc + clad, 0, Tc, sideTop, wh, 'osb');
+      G0 = 'shelf'; C(kb + clad, Bc - kb - clad, kt, Tc - kt, shelfTop - tw, shelfTop, 'osb');
+      G0 = 'deck'; C(kb + clad, Bc - kb - clad, kt, Tc - kt, deckTop - tw, deckTop, 'osb');
+      if (adj) [[kb + clad + 60, kt + 60], [Bc - kb - clad - 60, kt + 60], [kb + clad + 60, Tc - kt - 60], [Bc - kb - clad - 60, Tc - kt - 60]].forEach(([x, y]) => C(x - 8, x + 8, y - 8, y + 8, railTop, deckTop - tw, 'metal'));
+      G0 = 'clad'; if (clad) { C(-clad, 0, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); C(Bc, Bc + clad, 0, Tc, v.sRoll + foot, sideTop, '#e9dcc2'); }
+      G0 = 'cap'; C(-clad, kb, 0, Tc, sideTop, wh, 'osb'); C(Bc - kb, Bc + clad, 0, Tc, sideTop, wh, 'osb');
       const ys = (Tc - v.sT) / 2;
+      G0 = 'saw';
       C(sx, sx + v.sB, ys, ys + v.sT, deckTop, wh, '#aab4be');
       C(bladeX - 60, bladeX + 200, ys + v.sT - 140, ys + v.sT - 40, wh, wh + 260, '#4f7f4f');
       const xl = -clad - 2, yF = Tc - v.sFy;
-      C(xl - v.wL, xl, 0, Tc, wh - tw, wh, 'osb'); C(Bc + clad + 2, Bc + clad + 2 + v.wR, 0, Tc, wh - tw, wh, 'osb');
+      G0 = 'wing'; C(xl - v.wL, xl, 0, Tc, wh - tw, wh, 'osb'); C(Bc + clad + 2, Bc + clad + 2 + v.wR, 0, Tc, wh - tw, wh, 'osb');
+      G0 = 'fence';
       C(xl - v.wL, xl - nullT, yF - 18, yF, wh, wh + fenceH, '#f6e3c4'); C(xl - v.wL, xl - nullT, yF - 36 - cw, yF - 18 - cw, wh, wh + fenceH, '#f6e3c4');
       C(xl - nullT, xl, yF - 36 - cw, yF, wh, wh + fenceH, '#8a6a3a');
-      if (E) { C(xl - v.wL - E, xl - v.wL + 150, yF - chanW - 30, yF + 30, wh - 2 * tw, wh - tw, 'osb'); C(xl - v.wL - E, xl - v.wL, yF - 18, yF, wh - tw, wh + fenceH - tw, '#f6e3c4'); C(xl - v.wL - E + 20, xl - v.wL - E + 78, yF - 60, yF - 22, 0, wh - 2 * tw, 'wood'); }
+      if (scR) C(Bc + clad + 2, Bc + clad + 2 + v.wR, yF - 18, yF, wh, wh + fenceH, '#f6e3c4');
+      G0 = 'ext'; if (E) { C(xl - v.wL - E, xl - v.wL + 150, yF - chanW - 30, yF + 30, wh - 2 * tw, wh - tw, 'osb'); C(xl - v.wL - E, xl - v.wL, yF - 18, yF, wh - tw, wh + fenceH - tw, '#f6e3c4'); C(xl - v.wL - E + 20, xl - v.wL - E + 78, yF - 60, yF - 22, 0, wh - 2 * tw, 'wood'); }
+      G0 = 'stop'; if (scL) C(xl - 520, xl - 460, yF, yF + stopL, wh, wh + fenceH + 10, '#8a6a3a'); if (scR) C(Bc + clad + 300, Bc + clad + 360, yF, yF + stopL, wh, wh + fenceH + 10, '#8a6a3a');
       const rx1 = -(v.Lmax - bladeX);
-      C(rx1 - N - 40, rx1, yF - chanW, yF + 30, wh + fenceH, wh + fenceH + 18, 'hi'); C(rx1 - 30, rx1, yF, yF + 30, wh + 20, wh + fenceH, 'hi');
+      G0 = 'reiter'; C(rx1 - N - 40, rx1, yF - chanW, yF + 30, wh + fenceH, wh + fenceH + 18, 'hi'); C(rx1 - 30, rx1, yF, yF + 30, wh + 20, wh + fenceH, 'hi');
+      // --- Schrittbilder: Bauzustand bis zu diesem Schritt, neue Teile gelb ---
+      const ORDER = ['side', 'cross', 'shelf', 'clad', 'cap', 'deck', 'saw', 'wing', 'fence', 'ext', 'stop', 'reiter'];
+      const STEP_G = [
+        [/^Seitenrahmen/, 'side'], [/^Unterbau verbinden/, 'cross'], [/^Deckleisten/, 'cap'], [/^Deckplatte/, 'deck'], [/^Säge einsetzen/, 'saw'],
+        [/^Flügel/, 'wing'], [/^Lehrenaufnahme/, 'fence'], [/^Steckverlängerung/, 'ext'], [/^Anschlagklotz/, 'stop'], [/^Reiter bauen/, 'reiter'], [/^Justieren|^Benutzen/, 'all'],
+      ];
+      const room = { w: Bc, d: Tc };
+      plan.stepIllus = plan.steps.map(st => {
+        const head = (/<b>([^<]*)<\/b>/.exec(st) || [])[1] || '';
+        const hit = STEP_G.find(([re]) => re.test(head.trim()));
+        if (!hit) return null;
+        const upto = hit[1] === 'all' ? ORDER.length - 1 : ORDER.indexOf(hit[1]);
+        const shown = new Set(ORDER.slice(0, upto + 1).concat(hit[1] === 'cross' ? ['shelf'] : hit[1] === 'cap' ? ['clad'] : []));
+        const neu = new Set(hit[1] === 'all' ? ['reiter'] : hit[1] === 'cross' ? ['cross', 'shelf'] : hit[1] === 'cap' ? ['cap', 'clad'] : [hit[1]]);
+        const sel = cubes.filter(c => shown.has(c.g)).map(c => ({ ...c, c: neu.has(c.g) ? 'hi' : c.g === 'saw' ? 'b45' : c.c === 'metal' ? 'metal' : 'wood' }));
+        return sel.length ? iso3dSvg(sel, room, 'vr', '', { pal: 'mono', raw: true, noFloor: true }) : null;
+      });
       const iso = iso3dSvg(cubes, { w: Bc, d: Tc }, 'vr', '3D-Ansicht: Unterbau auf Rollen, Säge auf der Deckplatte, Flügel hochgeklappt, links Anschlag mit Lehrenkanal und Reiter (gelb).', { noFloor: true });
       // --- Skala-Streifen je Flügel (Draufsicht, nur Bereich am Anschlag) ---
       const scaleViews = [];
@@ -2175,6 +2202,59 @@ async function exportHeftPdf(tool, root, btn) {
       if (plan.buy && plan.buy.length) { need(20); write('Einkauf', ML, y + 4, 'xb', 12); y += 8; table([{ h: 'Menge', w: 0.18 }, { h: 'Artikel', w: 0.42 }, { h: 'Wofür', w: 0.4 }], plan.buy.map(r => [r[1], r[0], r[2]])); }
       if (plan.jigs && plan.jigs.length) { need(20); write('Lehren & Hilfsmittel', ML, y + 4, 'xb', 12); y += 8; table([{ h: 'Lehre', w: 0.3 }, { h: 'Maß', w: 0.18 }, { h: 'Wofür', w: 0.52 }], plan.jigs.filter(j => j[0] || j[2])); }
     }
+    // ===== Zuschnitt-Balken für Stabholz (wenn kein eigener Zuschnittplan) =====
+    const STOCK = 2500;
+    const linear = (plan.parts || []).filter(p => /Kantholz|Leiste|Latte/i.test(p.mat || '') && p.l > 0 && p.l <= STOCK);
+    if (!plan.cutplan && linear.length && linear.reduce((a, p) => a + p.qty, 0) >= 3) {
+      newPage('Zuschnitt');
+      const hatch = (x, yy, w, h) => { doc.setDrawColor(150); doc.setLineWidth(0.12); for (let t = -h; t < w; t += 1.1) { const u0 = Math.max(0, -t), u1 = Math.min(h, w - t); if (u1 > u0) doc.line(x + t + u0, yy + h - u0, x + t + u1, yy + h - u1); } doc.setDrawColor(...INK); doc.setLineWidth(0.25); doc.rect(x, yy, w, h, 'S'); };
+      const groups = {};
+      linear.forEach((p, i) => { const key = `${p.mat} ${fmt(p.b)} × ${fmt(p.t)}`; (groups[key] = groups[key] || []).push({ ...p, letter: String.fromCharCode(65 + i) }); });
+      para(`Stabholz auf ${num(STOCK / 1000)} m-Stücke verteilt (3 mm Schnittfuge eingerechnet). Buchstaben = Teile laut Liste.`, 'r', 8.5, GREY, 3);
+      for (const [key, ps] of Object.entries(groups)) {
+        const items = []; ps.forEach(p => { for (let k = 0; k < p.qty; k++) items.push({ len: p.l, label: p.letter }); });
+        const bins = packLengths(items, STOCK, 3);
+        need(14);
+        write(key, ML, y + 4, 'b', 10); write(`${bins.length} × ${num(STOCK / 1000)} m → ${items.length} Teile`, ML + W, y + 4, 'b', 7.5, { align: 'right' });
+        y += 6;
+        write(ps.map(p => `${p.letter} = ${p.name} ${fmt(p.l)}`).join(' · '), ML, y + 2.5, 'r', 6.8, { col: GREY }); y += 4.5;
+        const sc = W / STOCK, bh = 3.8;
+        bins.forEach(b => {
+          need(bh + 1.2);
+          doc.setDrawColor(...INK); doc.setLineWidth(0.25); doc.setFillColor(246, 246, 244); doc.rect(ML, y, W, bh, 'FD');
+          let px = ML;
+          b.items.forEach((it, j) => {
+            const w = it.len * sc; write(it.label, px + w / 2, y + bh * 0.72, 'b', 5.5, { align: 'center' });
+            px += w; doc.setLineDashPattern([0.7, 0.5], 0); doc.line(px, y, px, y + bh); doc.setLineDashPattern([], 0); px += 3 * sc;
+          });
+          if (ML + W - px > 0.6) hatch(px, y, ML + W - px, bh);
+          y += bh + 1.1;
+        });
+        y += 3; rule(y, 0.15, LINE); y += 3;
+      }
+    }
+    // ===== Teile-Karten =====
+    const cardParts = (plan.parts || []).filter(p => p.l > 0 && p.b > 0 && p.t > 0).slice(0, 12);
+    if (cardParts.length >= 2) {
+      newPage('Teile');
+      const cw2 = W / 3, ch2 = 52;
+      for (let i = 0; i < cardParts.length; i++) {
+        const p = cardParts[i], col = i % 3;
+        if (col === 0 && i) y += ch2 + 3;
+        if (col === 0) need(ch2 + 3);
+        const x = ML + col * cw2;
+        doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(x + 1, y, x + cw2 - 3, y);
+        const dims = [p.l, p.b, p.t].sort((a, b) => b - a);
+        const plate = dims[1] > 3 * dims[2] && dims[1] > 120;
+        const cube = [{ x0: 0, x1: dims[0], y0: 0, y1: plate ? dims[1] : dims[2], z0: 0, z1: plate ? dims[2] : dims[1], c: /Hartholz/.test(p.mat || '') ? '#8a6a3a' : plate ? 'osb' : 'wood' }];
+        host.innerHTML = iso3dSvg(cube, { w: dims[0], d: cube[0].y1 }, 'vr', '', { pal: 'mono', raw: true, noFloor: true, sw: Math.max(dims[0], 200) / 220 });
+        await doc.svg(prepSvg(host.querySelector('svg'), cw2 - 8, { family: hasInter ? 'Inter' : 'helvetica' }), { x: x + 3, y: y + 3, width: cw2 - 8, height: ch2 - 18 });
+        font('b', 8.6); const nm = doc.splitTextToSize(T(p.name), cw2 - 14)[0];
+        write(nm, x + 1, y + ch2 - 9, 'b', 8.6); write(`×${p.qty}`, x + cw2 - 3, y + ch2 - 9, 'b', 8.6, { align: 'right' });
+        write(`${fmt(p.l)} × ${fmt(p.b)} × ${fmt(p.t)} ${unit} · ${p.mat || ''}`, x + 1, y + ch2 - 4.5, 'r', 6.8, { col: GREY });
+      }
+      y += ch2 + 4;
+    }
     // ===== 3 · Zuschnittplan (falls vorhanden) =====
     if (plan.cutplan && cutFigs.length) {
       newPage('Zuschnitt');
@@ -2200,19 +2280,22 @@ async function exportHeftPdf(tool, root, btn) {
     // ===== 5 · Aufbau =====
     if (plan.steps && plan.steps.length) {
       newPage('Aufbau');
-      plan.steps.forEach((st, i) => {
+      for (let i = 0; i < plan.steps.length; i++) {
+        const st = plan.steps[i];
         const d = document.createElement('div'); d.innerHTML = st;
         const b = d.querySelector('b'); const head = b ? b.textContent.replace(/:$/, '') : '';
         if (b) b.remove();
         const body = d.textContent.replace(/^\s*:?\s*/, '').trim();
         font('r', 9); const lines = doc.splitTextToSize(T(body), W - 16);
-        need(10 + lines.length * 4.6);
+        const ill = plan.stepIllus && plan.stepIllus[i];
+        need(10 + lines.length * 4.6 + (ill ? 72 : 0));
         write(String(i + 1), ML, y + 8, 'xb', 20);
         if (head) write(head, ML + 14, y + 5.5, 'b', 11);
         y += head ? 8 : 2;
         para(body, 'r', 9, INK, 4, ML + 14, W - 14);
+        if (ill) { host.innerHTML = ill; const sv = host.querySelector('svg'); const vb = sv.viewBox.baseVal; const mh = 66; let w = W - 14, h = w * vb.height / vb.width; if (h > mh) { h = mh; w = h * vb.width / vb.height; } await doc.svg(prepSvg(sv, w, { family: hasInter ? 'Inter' : 'helvetica' }), { x: ML + 14 + (W - 14 - w) / 2, y, width: w, height: h }); y += h + 4; }
         rule(y - 2, 0.15, LINE); y += 2;
-      });
+      }
     }
     // ===== 6 · Hinweise =====
     if (plan.msgs && plan.msgs.length) {
