@@ -1244,6 +1244,7 @@ const toolJigs = {
     { g: 'Werkstück (messen!)', id: 'rB', label: 'Breite (Fläche mit Nut)', def: 78, unit: 'mm', show: isJig('router') },
     { g: 'Werkstück (messen!)', id: 'rH', label: 'Höhe', def: 58, unit: 'mm', show: isJig('router') },
     { g: 'Werkstück (messen!)', id: 'rL', label: 'Länge', def: 2000, unit: 'mm', show: isJig('router') },
+    { g: 'Nut', id: 'rMode', label: 'Nut in', type: 'select', def: 'face', options: [['face', 'die Fläche (mittig)'], ['edge', 'die Ecke / Längskante (Holz in V-Rinne)']], show: isJig('router') },
     { g: 'Nut', id: 'rD', label: 'Nutbreite = Fräser-Ø', def: 12, unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rT', label: 'Nuttiefe', def: 15, unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rG', label: 'Nutlänge (0 = durchgehend)', def: 0, unit: 'mm', show: isJig('router') },
@@ -1383,7 +1384,14 @@ const toolJigs = {
       // ===== Oberfräsen-Nutlade: Nut mittig in Kantholz =====
       const b = v.rB, h = v.rH, L = v.rL, d = v.rD, t = v.rT, D = v.rBase, rw = v.rRw;
       const base = 18, sledT = v.rSledT, gS = 12, gH = 20;       // Grundbrett, Schlittenplatte, Führungsleiste 12 × 20
-      const cwid = b + 1;                                        // lichte Weite Lade (0,5 mm je Seite)
+      const edge = v.rMode === 'edge', SQ = Math.SQRT2;
+      // Ecke: Holz liegt auf einer Ecke in einer 90°-V-Rinne; die gegenüberliegende Ecke zeigt nach oben
+      const zA = 12;                                             // Spitze der V-Rinne über dem Grundbrett
+      const diagH = (b + h) / SQ, off = (b - h) / SQ;            // Höhe der oberen Ecke über der V-Spitze, seitlicher Versatz
+      const cwid = edge ? Math.ceil(2 * Math.max(b, h) / SQ) + 6 : b + 1;   // lichte Weite Lade
+      const railH = edge ? Math.round(zA + diagH) : h;           // Wangen bündig mit der Holz-Oberkante bzw. Ecke
+      const apexX = cwid / 2 - off;                              // V-Spitze ab linker Wangen-Innenseite (oben liegende Ecke = Mitte)
+      const vBlockH = zA + Math.round(Math.min(b, h) / SQ * 0.6), nV = 0;
       const Bw = cwid + 2 * rw;                                  // Außenbreite Lade = Abstand der Führungsleisten innen
       const sledW = Bw + 1 + 2 * gS, sledL = Math.max(D + 80, 220);
       const Ll = L + sledL + 200;                                // Lade so lang, dass der Schlitten vor und nach dem Werkstück aufliegt
@@ -1393,21 +1401,23 @@ const toolJigs = {
       const stopped = v.rG > 0;
       const gA = stopped ? v.rA : 0, gLen = stopped ? Math.min(v.rG, L - gA) : L;
       if (d >= b - 10) msgs.push(['err', `Fräser Ø ${num(d)} ist zu breit für ein ${num(b)} mm breites Holz.`]);
-      if (t >= h - 10) msgs.push(['err', `Nuttiefe ${num(t)} lässt zu wenig Restholz (Höhe ${num(h)}).`]);
+      if (!edge && t >= h - 10) msgs.push(['err', `Nuttiefe ${num(t)} lässt zu wenig Restholz (Höhe ${num(h)}).`]);
+      if (edge && t > Math.min(b, h) * 0.5) msgs.push(['warn', `Nut ${num(t)} tief in die Ecke ist viel – sie schneidet beide Flächen ${num(t * SQ)} mm breit an.`]);
       if (reach > v.rPl) msgs.push(['warn', `Fräser muss ${num(reach)} mm unter die Schlittenplatte reichen, die Oberfräse schafft ${num(v.rPl)} mm Hub – dünnere Schlittenplatte (Plexiglas 6 mm) oder Nut in mehreren Durchgängen mit tieferer Spannung.`]);
       if (D + 20 > sledW) msgs.push(['info', `Die Grundplatte der Oberfräse (Ø ${num(D)}) ist breiter als die Lade – kein Problem, sie steht seitlich über.`]);
       if (stopped && gA + gLen > L) msgs.push(['err', 'Gestoppte Nut ist länger als das Werkstück.']);
-      msgs.push(['info', `Mittig durch Symmetrie: Die Führungsleisten des Schlittens laufen außen an den Wangen (Abstand innen ${num(Bw + 1)} mm), die Wangen stehen ${num(cwid)} mm auseinander. Das Holz wird mit zwei Keilen mittig gehalten. Kontrolle: flach fräsen, Holz um 180° drehen, nochmal – wird die Nut breiter, ist sie nicht mittig.`]);
+      if (edge) msgs.push(['info', `Ecke: Das Holz liegt auf einer Ecke in der V-Rinne, die gegenüberliegende Ecke zeigt nach oben (Höhe ${num(diagH)} mm über der V-Spitze). Weil ${num(b)} ≠ ${num(h)}, liegt diese Ecke ${num(Math.abs(off))} mm neben der V-Spitze – die V-Rinne sitzt deshalb um diesen Betrag versetzt in der Lade. Holz immer gleich herum einlegen: die ${num(Math.max(b, h))}-mm-Fläche nach ${off >= 0 ? 'rechts' : 'links'} unten. Die Nut schneidet beide Flächen je ${num(t * SQ)} mm breit an.`]);
+      if (!edge) msgs.push(['info', `Mittig durch Symmetrie: Die Führungsleisten des Schlittens laufen außen an den Wangen (Abstand innen ${num(Bw + 1)} mm), die Wangen stehen ${num(cwid)} mm auseinander. Das Holz wird mit zwei Keilen mittig gehalten. Kontrolle: flach fräsen, Holz um 180° drehen, nochmal – wird die Nut breiter, ist sie nicht mittig.`]);
       msgs.push(['warn', `Sägeraues Holz ist selten genau ${num(b)} × ${num(h)} mm: echtes Maß messen und eintragen. Ist das Holz niedriger als die Wangen, Streifen unterlegen, bis es bündig ist.`]);
       plan.kpis = [
-        ['Nut', `${num(d)} × ${num(t)} mm, mittig`], ['Lade lichte Weite', mm(cwid)], ['Lade-Länge', mm(Ll)],
+        ['Nut', `${num(d)} × ${num(t)} mm, ${edge ? 'in der Ecke' : 'mittig'}`], ...(edge ? [['V-Rinne versetzt um', mm(Math.abs(off))]] : []), ['Lade lichte Weite', mm(cwid)], ['Lade-Länge', mm(Ll)],
         ['Schlitten', `${num(sledW)} × ${num(sledL)}`], ['Durchgänge', `${passes} × ca. ${num(t / passes)} mm`], ['Fräser-Überstand', `≥ ${num(reach)} mm unter Platte`],
       ];
       plan.parts = [
         { name: 'Grundbrett Lade', qty: 1, l: Ll, b: Bw, t: base, mat: 'Multiplex', note: 'gerade, verwindungsfrei' },
-        { name: 'Seitenwange', qty: 2, l: Ll, b: rw, t: h, mat: 'Multiplex/Kantholz gehobelt', note: `genau ${num(h)} hoch = Holzhöhe, Oberkanten parallel` },
-        { name: 'Endanschlag', qty: 1, l: cwid, b: 40, t: h - 10, mat: 'Rest', note: `Werkstückanfang ${num(s0)} mm vom Ladenanfang` },
-        { name: 'Keil', qty: 4, l: 150, b: 20, t: h - 15, mat: 'Hartholz', note: '1:10 Steigung, paarweise gegeneinander' },
+        { name: 'Seitenwange', qty: 2, l: Ll, b: rw, t: railH, mat: 'Multiplex/Kantholz gehobelt', note: edge ? `genau ${num(railH)} hoch = Höhe der oberen Holzecke` : `genau ${num(h)} hoch = Holzhöhe, Oberkanten parallel` },
+        { name: 'Endanschlag', qty: 1, l: cwid, b: 40, t: railH - 10, mat: 'Rest', note: `Werkstückanfang ${num(s0)} mm vom Ladenanfang` },
+        ...(edge ? [{ name: 'V-Klotz (90°-Ausschnitt)', qty: Math.ceil(Ll / 400) + 1, l: cwid, b: 40, t: vBlockH + 15, mat: 'Multiplex 18 doppelt', note: `V-Spitze ${num(apexX)} mm von links, ${num(zA)} mm über Grundbrett – Schablone 1:1` }] : [{ name: 'Keil', qty: 4, l: 150, b: 20, t: h - 15, mat: 'Hartholz', note: '1:10 Steigung, paarweise gegeneinander' }]),
         { name: 'Schlittenplatte', qty: 1, l: sledL, b: sledW, t: sledT, mat: sledT <= 8 ? 'Plexiglas/Polycarbonat' : 'Multiplex', note: 'Mitte = Fräsermitte, Schablone 1:1' },
         { name: 'Führungsleiste', qty: 2, l: sledL, b: gH, t: gS, mat: 'Hartholz/Multiplex', note: `innen ${num(Bw + 1)} mm auseinander` },
         { name: 'Griffleiste', qty: 2, l: sledW, b: 40, t: 18, mat: 'Rest', note: 'quer auf den Schlitten, zum Schieben' },
@@ -1429,11 +1439,11 @@ const toolJigs = {
       ];
       plan.steps = [
         `<b>Holz messen:</b> Breite und Höhe des Kantholzes an mehreren Stellen messen und den größten Wert eintragen (aktuell ${num(b)} × ${num(h)} mm). Die Nut kommt in die ${num(b)}-mm-Fläche.`,
-        `<b>Lade bauen:</b> Seitenwangen (${mm(h)} hoch) auf das Grundbrett leimen und schrauben, lichter Abstand genau ${mm(cwid)} – mit einem Reststück des Holzes plus 1 mm Pappe als Abstandshalter. Oberkanten der Wangen müssen parallel und gerade sein.`,
+        edge ? `<b>Lade bauen:</b> Seitenwangen (${mm(railH)} hoch) auf das Grundbrett leimen und schrauben, lichter Abstand ${mm(cwid)}. Dazwischen alle 40 cm einen V-Klotz (Schablone 1:1): die 90°-Spitze sitzt ${mm(apexX)} von der linken Wange und ${mm(zA)} über dem Grundbrett – alle Klötze exakt gleich, am besten als Stapel zusammen aussägen. Holz probeweise einlegen: die obere Ecke muss genau mittig zwischen den Wangen und bündig mit deren Oberkante liegen.` : `<b>Lade bauen:</b> Seitenwangen (${mm(h)} hoch) auf das Grundbrett leimen und schrauben, lichter Abstand genau ${mm(cwid)} – mit einem Reststück des Holzes plus 1 mm Pappe als Abstandshalter. Oberkanten der Wangen müssen parallel und gerade sein.`,
         `<b>Endanschlag</b> quer zwischen die Wangen, ${mm(s0)} vom Ladenanfang – dort startet das Werkstück immer.`,
         `<b>Schlitten bauen:</b> Schablone 1:1 auf die Schlittenplatte kleben, Mitte körnen. Lochbild der Oberfräse von der Original-Grundplatte übertragen, mittig zur Markierung bohren und senken. Führungsleisten unter die Platte, innen genau ${mm(Bw + 1)} auseinander – am einfachsten mit der fertigen Lade als Lehre: Schlitten auflegen, Leisten an die Wangen schieben (Papier als 0,5-mm-Spiel dazwischen), verschrauben.`,
         `<b>Fräserloch:</b> Oberfräse aufschrauben und mit dem Nutfräser selbst durch die Schlittenplatte eintauchen – das Loch sitzt dann exakt mittig.`,
-        `<b>Holz einlegen:</b> Ans Endanschlag schieben, mit je einem Keilpaar vorne und hinten mittig festklemmen. ${stopped ? `Anschläge setzen: Start ${mm(stopStart)}, Ende ${mm(stopEnd)} ab Ladenanfang (Schlittenkanten).` : 'Für eine durchgehende Nut sind keine Anschläge nötig.'}`,
+        `<b>Holz einlegen:</b> Ans Endanschlag schieben, ${edge ? `auf die Ecke in die V-Rinne legen (${num(Math.max(b, h))}-mm-Fläche nach ${off >= 0 ? 'rechts' : 'links'} unten) und an beiden Enden mit Zwingen oder doppelseitigem Klebeband gegen Verdrehen sichern.` : 'mit je einem Keilpaar vorne und hinten mittig festklemmen.'} ${stopped ? `Anschläge setzen: Start ${mm(stopStart)}, Ende ${mm(stopEnd)} ab Ladenanfang (Schlittenkanten).` : 'Für eine durchgehende Nut sind keine Anschläge nötig.'}`,
         `<b>Fräsen:</b> ${passes} Durchgänge à ca. ${mm(t / passes)} bis ${mm(t)} Tiefe. Schlitten gleichmäßig in Fräsrichtung schieben (gegen die Drehrichtung des Fräsers), Führungsleisten an beiden Wangen anliegend.`,
         `<b>Prüfen:</b> Beim ersten Holz nach dem 1. Durchgang drehen und nochmal fräsen (siehe Hinweis). Passt es, bleibt die Lade eingestellt – jedes weitere Holz wird automatisch mittig.`,
       ];
@@ -1442,27 +1452,37 @@ const toolJigs = {
       // --- Schnitt (quer) ---
       const fsx = Math.max(sledW, 200) / 18;
       let g = S.rect(0, 0, Bw, base, 'class="wood2"');
-      g += S.rect(0, -h, rw, h, 'class="wood"') + S.rect(Bw - rw, -h, rw, h, 'class="wood"');
+      g += S.rect(0, -railH, rw, railH, 'class="wood"') + S.rect(Bw - rw, -railH, rw, railH, 'class="wood"');
       const wx = rw + 0.5;
-      g += S.rect(wx, -h, b, h, 'fill="#e7cf9f" stroke="#6b4a1f"');
-      g += S.rect(wx + b / 2 - d / 2, -h, d, t, 'fill="#fff" stroke="#c2410c"');
-      const sx0 = -gS - 0.5, sy = -h - sledT;
+      if (edge) {
+        const ax = rw + apexX, ay = -zA, u = 1 / SQ;
+        g += S.poly([[rw, 0], [Bw - rw, 0], [Bw - rw, -vBlockH], [ax + (vBlockH - zA), -vBlockH], [ax, ay], [ax - (vBlockH - zA), -vBlockH], [rw, -vBlockH]], 'fill="#d9b27c" stroke="#6b4a1f"');
+        const P1 = [ax + b * u, ay - b * u], P2 = [ax + (b - h) * u, ay - (b + h) * u], P3 = [ax - h * u, ay - h * u];
+        g += S.poly([[ax, ay], P1, P2, P3], 'fill="#e7cf9f" stroke="#6b4a1f"');
+        g += S.poly([[P2[0] - d / 2, P2[1]], [P2[0] + d / 2, P2[1]], [P2[0] + d / 2, P2[1] + t], [P2[0] - d / 2, P2[1] + t]], 'fill="#fff" stroke="#c2410c"');
+        g += S.text(ax, -railH / 2, 'Kantholz', `font-size="${fsx * 0.55}" text-anchor="middle"`);
+      } else {
+        g += S.rect(wx, -h, b, h, 'fill="#e7cf9f" stroke="#6b4a1f"');
+        g += S.rect(wx + b / 2 - d / 2, -h, d, t, 'fill="#fff" stroke="#c2410c"');
+      }
+      const sx0 = -gS - 0.5, sy = -railH - sledT;
       g += S.rect(sx0, sy, sledW, sledT, 'fill="#cfe3f0" stroke="#3b6e8f"');
       g += S.rect(sx0, sy + sledT, gS, gH, 'class="wood2"') + S.rect(Bw + 0.5, sy + sledT, gS, gH, 'class="wood2"');
       g += S.rect(Bw / 2 - D / 2, sy - 18, D, 18, 'fill="#9aa4ae" stroke="#555"') + S.rect(Bw / 2 - 45, sy - 160, 90, 142, 'fill="#3b6e8f" stroke="#1f3f55"');
       g += S.rect(Bw / 2 - d / 2, sy, d, sledT + t, 'fill="#c2410c"');
       g += S.line(Bw / 2, sy - 175, Bw / 2, base + 15, 'stroke="#c2410c" stroke-dasharray="4 3"');
       g += dimH(rw, Bw - rw, base + fsx * 1.3, `${num(cwid)} licht`, fsx * 0.6) + dimH(-gS - 0.5, Bw + gS + 0.5, base + fsx * 2.6, `Schlitten ${num(sledW)}`, fsx * 0.6);
-      g += dimV(-h, 0, Bw + gS + fsx * 1.4, num(h), fsx * 0.6) + dimH(wx + b / 2 - d / 2, wx + b / 2 + d / 2, -h - sledT - 190, `Nut ${num(d)}`, fsx * 0.55);
-      g += S.text(wx + b / 2, -h / 2, 'Kantholz', `font-size="${fsx * 0.55}" text-anchor="middle"`);
-      const sect = drawing(sx0 - fsx * 1.5, sy - 220, sledW + fsx * 4.5, -sy + 220 + base + fsx * 3.6, g, 'Querschnitt: Lade (Grundbrett + Wangen), Kantholz, Schlitten mit Führungsleisten außen an den Wangen – der Fräser (rot) läuft automatisch in der Mitte.');
+      g += dimV(-railH, 0, Bw + gS + fsx * 1.4, num(railH), fsx * 0.6) + dimH(Bw / 2 - d / 2, Bw / 2 + d / 2, -railH - sledT - 190, `Nut ${num(d)}`, fsx * 0.55);
+      if (!edge) g += S.text(wx + b / 2, -h / 2, 'Kantholz', `font-size="${fsx * 0.55}" text-anchor="middle"`);
+      if (edge) g += dimH(rw, rw + apexX, 30 + fsx * 4, `V-Spitze ${num(apexX)}`, fsx * 0.55);
+      const sect = drawing(sx0 - fsx * 1.5, sy - 220, sledW + fsx * 4.5, -sy + 220 + base + fsx * (edge ? 5.2 : 3.6), g, edge ? `Querschnitt: Holz liegt auf der Ecke in der V-Rinne (V-Klotz, versetzt um ${num(Math.abs(off))} mm), die obere Ecke ist genau mittig und bündig mit den Wangen – der Fräser (rot) geht in die Ecke.` : 'Querschnitt: Lade (Grundbrett + Wangen), Kantholz, Schlitten mit Führungsleisten außen an den Wangen – der Fräser (rot) läuft automatisch in der Mitte.');
       // --- Draufsicht ---
       const fs2 = Ll / 34;
       let g2 = S.rect(0, 0, Ll, Bw, 'class="wood2"') + S.rect(0, 0, Ll, rw, 'class="wood"') + S.rect(0, Bw - rw, Ll, rw, 'class="wood"');
-      g2 += S.rect(s0, rw + 0.5, L, b, 'fill="#e7cf9f" stroke="#6b4a1f"');
+      g2 += edge ? S.rect(s0, rw + apexX - h / SQ, L, (b + h) / SQ, 'fill="#e7cf9f" stroke="#6b4a1f"') + S.line(s0, Bw / 2, s0 + L, Bw / 2, 'stroke="#6b4a1f" stroke-width="1.5"') : S.rect(s0, rw + 0.5, L, b, 'fill="#e7cf9f" stroke="#6b4a1f"');
       g2 += S.rect(s0 + gA, Bw / 2 - d / 2, gLen, d, 'fill="#fff" stroke="#c2410c"');
       g2 += S.rect(s0 - 40, rw, 40, cwid, 'fill="#8a6a3a"');
-      [s0 + 40, s0 + L - 190].forEach(x => { g2 += S.poly([[x, rw + 1], [x + 150, rw + 1], [x + 150, rw + 16]], 'fill="#f2c94c" stroke="#7a5a00"'); });
+      if (!edge) [s0 + 40, s0 + L - 190].forEach(x => { g2 += S.poly([[x, rw + 1], [x + 150, rw + 1], [x + 150, rw + 16]], 'fill="#f2c94c" stroke="#7a5a00"'); });
       const sxp = s0 + gA + gLen / 2 - sledL / 2;
       g2 += S.rect(sxp, -gS, sledL, sledW, 'fill="#cfe3f0" fill-opacity="0.75" stroke="#3b6e8f"') + S.circle(sxp + sledL / 2, Bw / 2, D / 2, 'fill="none" stroke="#555" stroke-dasharray="6 4"');
       if (stopped) [stopStart - 60, stopEnd].forEach(x => { g2 += S.rect(x, 0, 60, rw, 'fill="#c2410c"'); });
@@ -1480,16 +1500,27 @@ const toolJigs = {
       sb += S.text(p0 + gS / 2, p0 + sledL / 2, 'Führungsleiste', `font-size="2.6" text-anchor="middle" transform="rotate(-90 ${p0 + gS / 2} ${p0 + sledL / 2})"`);
       sb += S.text(p0 + sledW / 2, p0 + sledL / 2 + D / 2 + 5, `Grundplatte Oberfräse Ø ${num(D)}`, 'font-size="2.6" text-anchor="middle"');
       plan.templates = [{ title: 'Schlittenplatte 1:1', w: sledW + 2 * p0, h: sledL + 2 * p0, body: sb, hint: 'aufkleben, Mitte körnen, Lochbild der Fräse ausrichten' }];
+      if (edge) {
+        const q0 = 8, Hb = vBlockH + 15, ax = q0 + apexX, ayb = q0 + Hb - zA;
+        let vb = S.poly([[q0, q0 + Hb], [q0 + cwid, q0 + Hb], [q0 + cwid, q0], [ax + (Hb - zA), q0], [ax, ayb], [ax - (Hb - zA), q0], [q0, q0]], 'fill="none" stroke="#000" stroke-width="0.35"');
+        vb += S.line(ax, q0 - 4, ax, q0 + Hb + 4, 'stroke="#c00" stroke-width="0.25" stroke-dasharray="2 1"') + S.line(q0 + cwid / 2, q0 - 4, q0 + cwid / 2, q0 + Hb + 4, 'stroke="#06c" stroke-width="0.25" stroke-dasharray="2 1"');
+        vb += S.text(ax, q0 + Hb + 8, `V-Spitze ${num(apexX)} von links, ${num(zA)} über Unterkante`, 'font-size="2.8" text-anchor="middle" fill="#c00"');
+        vb += S.text(q0 + cwid / 2, q0 - 6, 'Mitte Lade = obere Holzecke', 'font-size="2.8" text-anchor="middle" fill="#06c"');
+        vb += S.text(q0 + 2, q0 + Hb - 3, 'links', 'font-size="2.6"');
+        plan.templates.push({ title: 'V-Klotz 1:1 (90°-Ausschnitt)', w: cwid + 16, h: Hb + 20, body: vb, hint: 'alle Klötze als Stapel gemeinsam aussägen – die 45°-Flanken müssen genau stimmen' });
+      }
       // Schrittbilder (3D, Strich)
       const cub = [], A = (x0, x1, y0, y1, z0, z1, c, gg) => cub.push({ x0, x1, y0, y1, z0, z1, c, g: gg });
-      A(0, Ll, 0, Bw, 0, base, 'wood', 'base'); A(0, Ll, 0, rw, base, base + h, 'wood', 'rail'); A(0, Ll, Bw - rw, Bw, base, base + h, 'wood', 'rail');
-      A(s0 - 40, s0, rw, Bw - rw, base, base + h - 10, 'wood', 'stop');
-      A(s0, s0 + L, rw + 0.5, rw + 0.5 + b, base, base + h, 'osb', 'work');
-      A(s0 + 40, s0 + 190, rw + 0.5, rw + 15, base, base + h - 15, 'wood', 'wedge');
+      A(0, Ll, 0, Bw, 0, base, 'wood', 'base'); A(0, Ll, 0, rw, base, base + railH, 'wood', 'rail'); A(0, Ll, Bw - rw, Bw, base, base + railH, 'wood', 'rail');
+      if (edge) for (let x = 100; x < Ll; x += 400) A(x, x + 40, rw, Bw - rw, base, base + vBlockH, 'wood', 'rail');
+      A(s0 - 40, s0, rw, Bw - rw, base, base + railH - 10, 'wood', 'stop');
+      if (edge) A(s0, s0 + L, rw + apexX - h / SQ, rw + apexX + b / SQ, base + zA, base + railH, 'osb', 'work'); else A(s0, s0 + L, rw + 0.5, rw + 0.5 + b, base, base + h, 'osb', 'work');
+      if (!edge) A(s0 + 40, s0 + 190, rw + 0.5, rw + 15, base, base + h - 15, 'wood', 'wedge');
       const sxx = s0 + Math.min(L * 0.3, 300);
-      A(sxx, sxx + sledL, -gS - 0.5, Bw + gS + 0.5, base + h, base + h + sledT, 'osb', 'sled');
-      A(sxx, sxx + sledL, -gS - 0.5, -0.5, base + h - gH, base + h, 'wood', 'sled'); A(sxx, sxx + sledL, Bw + 0.5, Bw + gS + 0.5, base + h - gH, base + h, 'wood', 'sled');
-      A(sxx + sledL / 2 - 50, sxx + sledL / 2 + 50, Bw / 2 - 50, Bw / 2 + 50, base + h + sledT, base + h + sledT + 180, 'b45', 'router');
+      const zt = base + railH;
+      A(sxx, sxx + sledL, -gS - 0.5, Bw + gS + 0.5, zt, zt + sledT, 'osb', 'sled');
+      A(sxx, sxx + sledL, -gS - 0.5, -0.5, zt - gH, zt, 'wood', 'sled'); A(sxx, sxx + sledL, Bw + 0.5, Bw + gS + 0.5, zt - gH, zt, 'wood', 'sled');
+      A(sxx + sledL / 2 - 50, sxx + sledL / 2 + 50, Bw / 2 - 50, Bw / 2 + 50, zt + sledT, zt + sledT + 180, 'b45', 'router');
       const SG = [[/^Lade bauen/, ['base', 'rail'], ['rail']], [/^Endanschlag/, ['base', 'rail', 'stop'], ['stop']], [/^Schlitten bauen|^Fräserloch/, ['base', 'rail', 'stop', 'sled', 'router'], ['sled']], [/^Holz einlegen/, ['base', 'rail', 'stop', 'work', 'wedge'], ['work', 'wedge']], [/^Fräsen/, ['base', 'rail', 'stop', 'work', 'wedge', 'sled', 'router'], ['router']]];
       plan.stepIllus = plan.steps.map(st => {
         const head = ((/<b>([^<]*)<\/b>/.exec(st) || [])[1] || '').trim();
