@@ -1218,7 +1218,7 @@ const toolCleat = {
 /* =====================================================================
    TOOL 3: Schienen & Schablonen
    ===================================================================== */
-const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag'], ['saw', 'Kappsägen-Tisch mit Klappflügeln + Lehrenaufnahme'], ['router', 'Oberfräsen-Nutlade (Bosch POF 500 A)'], ['routerEdge', 'Oberfräsen-Nutlade für die Kante / Ecke (Bosch POF 500 A)']];
+const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag'], ['saw', 'Kappsägen-Tisch mit Klappflügeln + Lehrenaufnahme'], ['router', 'Oberfräsen-Nutlade (Bosch POF 500 A)'], ['flipbench', 'Klapp-Werkbank: Regal (4 Ebenen) ↔ Werkbank > 2 m'], ['routerEdge', 'Oberfräsen-Nutlade für die Kante / Ecke (Bosch POF 500 A)']];
 const isJig = (...ids) => v => ids.includes(v.jig);
 const toolJigs = {
   id: 'jigs',
@@ -1241,6 +1241,17 @@ const toolJigs = {
     { g: 'Lochreihe', id: 'depth', label: 'Bohrtiefe', def: 12, unit: 'mm', show: isJig('holes32') },
     { g: 'Ablänglehre', id: 'Lz', label: 'Ziellänge', def: 445, unit: 'mm', show: isJig('stop') },
     { g: 'Ablänglehre', id: 'qty', label: 'Stückzahl', def: 24, unit: 'Stk', show: isJig('stop') },
+    { g: 'Raum', id: 'fCeil', label: 'Deckenhöhe', def: 2340, unit: 'mm', show: isJig('flipbench') },
+    { g: 'Raum', id: 'fObst', label: 'Lampe/Rohr hängt herunter', def: 0, unit: 'mm', help: 'über dem Stellplatz, 0 = nichts', show: isJig('flipbench') },
+    { g: 'Raum', id: 'fTop', label: 'Oben auf dem Turm', def: 0, unit: 'mm', help: 'Höhe einer Box o. ä. obendrauf', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fWh', label: 'Arbeitshöhe', def: 900, unit: 'mm', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fT', label: 'Tiefe', def: 600, unit: 'mm', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fL0', label: 'Unterbau Länge', def: 1100, unit: 'mm', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fLk', label: 'Klappteil Länge', def: 1300, unit: 'mm', help: '= Höhe über der Arbeitsfläche im Turm', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fDu', label: 'Klappteil Tiefe (Fachtiefe Ebene 3+4)', def: 300, unit: 'mm', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fRoll', label: 'Rollen-Bauhöhe', def: 75, unit: 'mm', show: isJig('flipbench') },
+    { g: 'Gasfedern', id: 'fA', label: 'Anker unten: unter Arbeitshöhe', def: 0, unit: 'mm', help: '0 = automatisch', show: isJig('flipbench') },
+    { g: 'Gasfedern', id: 'fB', label: 'Anker oben: Abstand vom Scharnier', def: 0, unit: 'mm', help: '0 = automatisch', show: isJig('flipbench') },
     { g: 'Werkstück (messen!)', id: 'rB', label: 'Breite (Fläche mit Nut)', def: 78, unit: 'mm', show: isJig('router', 'routerEdge') },
     { g: 'Werkstück (messen!)', id: 'rH', label: 'Höhe', def: 58, unit: 'mm', show: isJig('router', 'routerEdge') },
     { g: 'Werkstück (messen!)', id: 'rL', label: 'Länge', def: 2000, unit: 'mm', show: isJig('router', 'routerEdge') },
@@ -1385,6 +1396,138 @@ const toolJigs = {
       g += S.text(4, -46, 'Sägeblatt', `font-size="${fs * 0.7}" class="lbl"`);
       g += dimH(0, v.Lz, 80 + fs * 1.5, num(v.Lz), fs);
       plan.drawings = [drawing(-fs, -fs * 3, len + fs * 2, 80 + fs * 5, g, 'Draufsicht: Abstand Sägeblatt → Anschlagklotz')];
+      plan.templates = [];
+    } else if (v.jig === 'flipbench') {
+      // ===== Klapp-Werkbank: Regal mit 4 Ebenen ↔ Werkbank > 2 m =====
+      // Seitenansicht: x entlang der Werkbank, z nach oben. Scharnier H am Ende der Unterbau-Platte auf Arbeitshöhe.
+      // Klappteil = Kasten (Platte + Seitenbretter, Tiefe Du). Turm: senkrecht über dem Unterbau-Ende, Platte zeigt zum Unterbau.
+      // Kippt im Uhrzeigersinn um 90° nach außen → Platte liegt bündig auf Arbeitshöhe, Kasten hängt darunter.
+      const wh = v.fWh, T = v.fT, L0 = v.fL0, Lk = v.fLk, Du = v.fDu, tw = 18, kb = 58, kt = 38, hr = v.fRoll;
+      const Hfree = v.fCeil - v.fObst;
+      const towerH = wh + Lk + v.fTop;
+      const benchL = L0 - Du + Lk;
+      const Hx = L0 - Du;                                     // Scharnier (x) – Ende der Unterbau-Platte
+      const auflageTop = wh - Du;                              // abgesenkter Auflagebalken am Unterbau-Ende
+      const legL = wh - Du - 20;                               // Klappbein bis Boden (mit 20 mm Stellfuß)
+      // Gewicht Klappteil (grob): Multiplex 18 ≈ 11 kg/m², Kantholz ≈ 1,2 kg/m
+      const plyArea = (Lk * T + 2 * Lk * Du + 2 * T * Du + 2 * T * Du) / 1e6;
+      const mK = plyArea * 11 + 2 * (legL / 1000) * 1.2 + 2;
+      const g = 9.81;
+      // Gasfedern: Anker A am Unterbau-Endpfosten unter dem Scharnier, P am Klappteil-Seitenbrett
+      const Mg90 = mK * g * (Lk / 2) / 1000;                   // Nm, Klappteil waagerecht
+      // Feder-Geometrie für Ankerabstände (a unter Arbeitshöhe am Endbein, b vom Scharnier am Seitenbrett)
+      const geo = (a, b, rx = 40) => {
+        const A = [Du - kb / 2, -a];
+        const Pat = th => { const rz = b, c = Math.cos(th), s = Math.sin(th); return [rx * c + rz * s, -rx * s + rz * c]; };
+        const dist = th => Math.hypot(Pat(th)[0] - A[0], Pat(th)[1] - A[1]);
+        const arm = th => { const P = Pat(th), dx = P[0] - A[0], dy = P[1] - A[1]; return Math.abs(A[0] * dy - A[1] * dx) / Math.hypot(dx, dy); };
+        const Lext = dist(0), Lcomp = dist(Math.PI / 2), stroke = Lext - Lcomp;
+        const F = (0.7 * Mg90 / (arm(Math.PI / 2) / 1000)) / 2;   // je Feder, 70 % Ausgleich, 2 Federn
+        return { a, b, rx, A, Pat, Lext, Lcomp, stroke, F, ok: stroke >= 60 && Lcomp >= stroke + 100 && F <= 1200 };
+      };
+      const aMin = Du + 60, aMax = Math.max(aMin, wh - hr - 80);
+      let best = null;
+      if (v.fA > 0 && v.fB > 0) best = geo(Math.max(aMin, Math.min(v.fA, aMax)), Math.min(v.fB, Lk - 100));
+      else for (let a = aMin; a <= aMax; a += 10) for (let b = 100; b <= Math.min(600, Lk - 100); b += 10) for (let rx = 30; rx <= Du - 25; rx += 15) {
+        const q = geo(a, b, rx);
+        if (q.ok && q.Lext <= 750 && (!best || q.F < best.F - 1 || (Math.abs(q.F - best.F) <= 1 && q.Lext < best.Lext))) best = q;
+      }
+      if (!best) best = geo(aMin, 150);
+      const { a, b, rx: aRx, A, Pat, Lext, Lcomp, stroke } = best;
+      const F = Math.ceil(best.F / 50) * 50;
+      const Fstd = [150, 200, 250, 300, 350, 400, 500, 600, 700, 800, 1000, 1200].find(x => x >= F) || F;
+      const mkTop = Math.round(mK);
+      // Prüfungen
+      if (towerH > Hfree - 50) msgs.push(['err', `Turm ${num(towerH)} mm hoch, frei bis Decke/Hindernis nur ${num(Hfree)} mm – Klappteil kürzer machen oder niedrigere Arbeitshöhe.`]);
+      else msgs.push(['info', `Deckenprüfung: Turm ${num(towerH)} mm, frei ${num(Hfree)} mm → ${num(Hfree - towerH)} mm Luft. Beim Kippen nach außen wird der Turm nicht höher (der Kasten schwenkt vom Scharnier weg).`]);
+      if (benchL < 2000) msgs.push(['warn', `Werkbank nur ${num(benchL)} mm lang. Für > 2 m Klappteil oder Unterbau verlängern.`]);
+      if (Du >= L0 - 200) msgs.push(['err', 'Klappteil-Tiefe zu groß für den Unterbau.']);
+      if (Lcomp < stroke + 80) msgs.push(['warn', `Gasfeder-Geometrie ungünstig (eingefahren ${num(Lcomp)} mm bei ${num(stroke)} mm Hub). Anker am Klappteil weiter vom Scharnier (b) oder tiefer am Unterbau (a) setzen.`]);
+      if (towerH / L0 > 2) msgs.push(['warn', `Turm ist ${(towerH / L0).toFixed(1).replace('.', ',')} × so hoch wie lang – im Turmzustand immer mit Gurt oder Haken an der Wand sichern (Kippgefahr, besonders auf Rollen).`]);
+      msgs.push(['info', `Gasfeder-Anker${v.fA > 0 && v.fB > 0 ? '' : ' (automatisch gewählt)'}: unten ${num(a)} mm unter Arbeitshöhe am Endbein, oben ${num(b)} mm vom Scharnier und ${num(aRx)} mm von der Platte am Seitenbrett. Im Turm drückt die Feder den Klappteil leicht zum Unterbau – der Riegel hält ihn in beide Richtungen.`]);
+      msgs.push(['info', `Gasfedern: 2 × ca. ${num(Fstd)} N (Klappteil ca. ${mkTop} kg, Moment waagerecht ${Math.round(Mg90)} Nm, ca. 70 % ausgeglichen). Am besten einstellbare Federn mit Ventil – dann passt die Kraft auch, wenn Boxen oder eine Säge dazukommen. Federn mit der Kolbenstange nach unten einbauen.`]);
+      msgs.push(['warn', 'Vor dem Kippen: Boxen aus den Fächern des Klappteils nehmen, Rollen feststellen, Riegel lösen, Klappteil mit beiden Händen führen. Im Tischzustand Klappbeine ausklappen, bevor belastet wird.']);
+      plan.kpis = [['Werkbank-Länge', mm(benchL)], ['Turm-Höhe', mm(towerH)], ['Luft zur Decke', mm(Hfree - towerH)], ['Ebenen im Turm', '4'], ['Gasfedern', `2 × ${num(Fstd)} N`], ['Federlänge / Hub', `${num(Lext)} / ${num(stroke)} mm`]];
+      // Teile
+      const zS1 = hr + 120, zS2 = Math.round((zS1 + auflageTop) / 2);
+      plan.parts = [
+        { name: 'Unterbau Bein (Seite Wand / Anfang)', qty: 2, l: wh - tw - hr, b: kb, t: kt, mat: 'Kantholz', note: '' },
+        { name: 'Unterbau Bein (Scharnierseite)', qty: 2, l: auflageTop - hr, b: kb, t: kt, mat: 'Kantholz', note: `oben = Auflagebalken auf ${num(auflageTop)} mm` },
+        { name: 'Unterbau Längsriegel oben', qty: 2, l: Hx, b: kb, t: kt, mat: 'Kantholz', note: 'endet am Scharnier' },
+        { name: 'Unterbau Längsriegel unten / Mitte', qty: 4, l: L0, b: kb, t: kt, mat: 'Kantholz', note: `Fachboden-Ebenen 1 + 2 auf ${num(zS1)} / ${num(zS2)} mm` },
+        { name: 'Auflagebalken', qty: 1, l: T, b: kb, t: kt, mat: 'Kantholz', note: `Oberkante ${num(auflageTop)} – hier liegt der Klappteil im Tischzustand auf` },
+        { name: 'Unterbau Arbeitsplatte', qty: 1, l: Hx, b: T, t: tw, mat: 'Multiplex', note: 'Kante am Scharnier gerade und sauber' },
+        { name: 'Unterbau Fachboden (Ebene 1 + 2)', qty: 2, l: L0, b: T, t: tw, mat: 'Multiplex/OSB', note: '' },
+        { name: 'Klappteil Platte (= Arbeitsfläche)', qty: 1, l: Lk, b: T, t: tw, mat: 'Multiplex', note: 'im Turm zum Unterbau gewandt' },
+        { name: 'Klappteil Seitenbrett', qty: 2, l: Lk, b: Du - tw, t: tw, mat: 'Multiplex', note: 'auf die Platte, Gasfeder-Anker hier' },
+        { name: 'Klappteil Stirnbrett', qty: 2, l: T - 2 * tw, b: Du - tw, t: tw, mat: 'Multiplex', note: 'oben/unten' },
+        { name: 'Klappteil Fachboden (Ebene 3 + 4)', qty: 2, l: T - 2 * tw, b: Du - tw, t: tw, mat: 'Multiplex', note: `auf ${num(Lk / 3)} und ${num(2 * Lk / 3)} ab Scharnier – im Tisch versteifen sie die Platte` },
+        { name: 'Klappbein', qty: 2, l: legL, b: kb, t: kt, mat: 'Kantholz', note: 'am freien Ende, mit Stellfuß' },
+        { name: 'Klappbein-Querstrebe', qty: 1, l: T - 2 * tw - 10, b: kb, t: kt, mat: 'Kantholz', note: '' },
+        { name: 'Riegel-Lasche (Turm)', qty: 2, l: Du + 150, b: 40, t: 4, mat: 'Flachstahl / Lochband doppelt', note: 'Klappteil ↔ Unterbau-Endbein, Steckbolzen' },
+      ];
+      plan.buy = [
+        ['Kantholz 58 × 38 mm, 2,5 m', `ca. ${Math.ceil((2 * (wh - tw - hr) + 2 * (auflageTop - hr) + 2 * Hx + 4 * L0 + T + 2 * legL + T) * 1.15 / 2500)} Stk`, 'Unterbau, Klappbeine'],
+        ['Multiplex 18 mm', `ca. ${((Hx * T + 2 * L0 * T + Lk * T + 2 * Lk * Du + 4 * T * Du) / 1e6 * 1.15).toFixed(2).replace('.', ',')} m²`, 'zuschneiden lassen'],
+        ['Schwerlast-Scharnier / Klavierband', `${num(T - 40)} mm oder 3 × 100 mm`, 'Platte Unterbau ↔ Klappteil, Achse genau an der Plattenkante'],
+        [`Gasfeder ${num(Fstd)} N, Länge ca. ${num(Math.round(Lext / 10) * 10)} mm, Hub ≥ ${num(Math.ceil(stroke / 10) * 10)} mm`, '2 Stk', 'am besten einstellbar (mit Ventil), mit Kugelpfannen + Befestigungswinkeln'],
+        ['Klappbeinbeschlag (arretierend)', '2 Stk', 'Klappbeine am freien Ende'],
+        ['Stellfuß M8/M10', '2 Stk', 'Klappbeine fein einstellen'],
+        ['Steckbolzen Ø 10 mit Sicherung', '2 Stk', 'Riegel im Turmzustand'],
+        ['Lenkrolle Ø 75, 2 mit Bremse', '4 Stk', `Bauhöhe ca. ${num(hr)} mm`],
+        ['Wandsicherung (Gurt mit Haken / Kippsicherung)', '1 Satz', 'im Turmzustand immer einhängen'],
+        ['Holzschraube 5 × 80, 4 × 40, Leim', '–', ''],
+      ];
+      plan.jigs = [['Richtlatte 2 m', '–', 'Unterbau-Platte und Klappteil-Platte bündig prüfen'], ['Winkel', '–', 'Klappteil im Turm senkrecht, im Tisch waagerecht']];
+      plan.steps = [
+        `<b>Unterbau:</b> Rahmen aus 4 Beinen bauen – die zwei Beine auf der Scharnierseite enden auf ${mm(auflageTop)}, dort quer der Auflagebalken. Längsriegel oben nur bis zum Scharnier (${mm(Hx)}), Fachböden für Ebene 1 + 2 auf ${mm(zS1)} und ${mm(zS2)}. Rollen unter die Beine.`,
+        `<b>Arbeitsplatte Unterbau:</b> ${mm(Hx)} × ${mm(T)} aufschrauben, Oberkante genau ${mm(wh)}. Die Kante am Scharnier muss gerade sein – sie ist die Drehachse.`,
+        `<b>Klappteil-Kasten:</b> Platte ${mm(Lk)} × ${mm(T)}, darauf Seitenbretter und Stirnbretter (${mm(Du - tw)} hoch) und die zwei Fachböden (Ebene 3 + 4). Kasten muss verwindungssteif sein – leimen und schrauben.`,
+        `<b>Scharnier:</b> Klappteil liegend an den Unterbau legen (Tischzustand), Platten bündig mit der Richtlatte, Unterseite liegt auf dem Auflagebalken. Scharnier/Klavierband genau an der Plattenkante oben verschrauben – Achse in der Plattenebene.`,
+        `<b>Klappbeine:</b> Am freien Ende innen zwei Klappbeine (${mm(legL)}) mit Querstrebe und arretierenden Beschlägen, Stellfüße unten. Höhe so einstellen, dass die Platte waagerecht und bündig liegt.`,
+        `<b>Gasfedern:</b> Anker unten am Endbein des Unterbaus, ${mm(a)} unter Arbeitshöhe; Anker oben am Seitenbrett des Klappteils, ${mm(b)} vom Scharnier und ${mm(aRx)} von der Platte. Feder: ca. ${num(Fstd)} N, ausgefahren ca. ${mm(Lext)}, Hub ca. ${mm(stroke)}. Beide Federn außen an Endbein und Seitenbrett (links und rechts), so laufen sie am Auflagebalken vorbei. Kolbenstange nach unten. Erst eine Feder einbauen und testen.`,
+        `<b>Riegel für den Turm:</b> Klappteil hochklappen, senkrecht stellen (Winkel). Zwei Laschen vom Klappteil-Seitenbrett zum Unterbau-Endbein, Steckbolzen Ø 10. Im Turm immer einstecken.`,
+        `<b>Wand sichern:</b> Im Turmzustand (${mm(towerH)} hoch) mit Gurt oder Haken an der Wand einhängen.`,
+        `<b>Umbauen:</b> Boxen aus Ebene 3 + 4 nehmen → Rollen fest → Wandsicherung lösen → Riegel ziehen → Klappteil mit beiden Händen nach außen ablassen (die Gasfedern bremsen) → Klappbeine ausklappen und arretieren. Zurück in umgekehrter Reihenfolge.`,
+      ];
+      // --- Seitenansichten: Tisch und Turm mit Schwenkbogen und Decke ---
+      const fs = Math.max(benchL, v.fCeil) / 34;
+      const Y = z => v.fCeil + 100 - z;
+      const sideView = (tower) => {
+        let s = S.line(-100, Y(0), benchL + 300, Y(0), 'stroke="#333" stroke-width="2"');
+        s += S.line(-100, Y(v.fCeil), benchL + 300, Y(v.fCeil), 'stroke="#333" stroke-width="2"') + S.text(benchL + 250, Y(v.fCeil) - 10, `Decke ${num(v.fCeil)}`, `font-size="${fs * 0.6}" text-anchor="end" class="lbl"`);
+        if (v.fObst) s += S.rect(Hx - 200, Y(v.fCeil), 400, v.fObst, 'fill="#f5d6d6" stroke="#8a1c1c"') + S.text(Hx, Y(v.fCeil - v.fObst) + fs * 0.8, 'Lampe/Rohr', `font-size="${fs * 0.5}" text-anchor="middle" fill="#8a1c1c"`);
+        // Unterbau
+        [[0, wh - tw - hr], [L0 - kb, auflageTop - hr]].forEach(([x, l]) => { s += S.rect(x, Y(hr + l), kb, l, 'class="wood2"'); });
+        s += S.rect(0, Y(wh), Hx, tw, 'class="wood"') + S.rect(L0 - kb, Y(auflageTop), kb, kb, 'class="wood2"');
+        [zS1, zS2].forEach(z => { s += S.rect(0, Y(z), L0, tw, 'class="wood"'); });
+        [kb, L0 - kb].forEach(x => { s += S.circle(x, Y(hr / 2), hr / 2, 'fill="#555"'); });
+        // Gasfeder-Anker A
+        const Ax = Hx + A[0], Az = wh + A[1];
+        if (tower) {
+          s += S.rect(Hx, Y(wh + Lk), tw, Lk, 'class="wood"') + S.rect(Hx, Y(wh + Lk), Du, Lk, 'fill="#f6e3c4" fill-opacity="0.6" stroke="#6b4a1f"');
+          [Lk / 3, 2 * Lk / 3].forEach(z => { s += S.rect(Hx + tw, Y(wh + z), Du - tw, tw, 'class="wood"'); });
+          const P = Pat(0); s += S.line(Ax, Y(Az), Hx + P[0], Y(wh + P[1]), 'stroke="#c2410c" stroke-width="3"');
+          // Schwenkbogen der äußeren Ecken
+          const r1 = Lk, r2 = Math.hypot(Lk, Du);
+          s += `<path d="M ${Hx} ${Y(wh + r1)} A ${r1} ${r1} 0 0 1 ${Hx + r1} ${Y(wh)}" fill="none" stroke="#c2410c" stroke-dasharray="10 8"/>`;
+          s += `<path d="M ${Hx + Du} ${Y(wh + Lk)} A ${r2} ${r2} 0 0 1 ${Hx + r2} ${Y(wh - (Du * Lk / r2) * 0)}" fill="none" stroke="#c2410c" stroke-dasharray="4 6" opacity="0.6"/>`;
+          s += dimV(Y(towerH), Y(0), -fs * 1.2, `Turm ${num(towerH)}`, fs * 0.7);
+          s += dimV(Y(v.fCeil - v.fObst), Y(towerH), Hx + Du + fs * 1.2, `Luft ${num(Hfree - towerH)}`, fs * 0.6);
+          s += S.text(Hx + Du + 20, Y(wh + Lk / 3) - 10, 'Ebene 3', `font-size="${fs * 0.5}" class="lbl"`) + S.text(Hx + Du + 20, Y(wh + 2 * Lk / 3) - 10, 'Ebene 4', `font-size="${fs * 0.5}" class="lbl"`);
+          s += S.text(L0 / 2, Y(zS1) - 10, 'Ebene 1', `font-size="${fs * 0.5}" text-anchor="middle" class="lbl"`) + S.text(L0 / 2, Y(zS2) - 10, 'Ebene 2', `font-size="${fs * 0.5}" text-anchor="middle" class="lbl"`);
+        } else {
+          s += S.rect(Hx, Y(wh), Lk, tw, 'class="wood"') + S.rect(Hx, Y(wh), Lk, Du, 'fill="#f6e3c4" fill-opacity="0.6" stroke="#6b4a1f"');
+          [Lk / 3, 2 * Lk / 3].forEach(x => { s += S.rect(Hx + x, Y(wh - tw), tw, Du - tw, 'class="wood"'); });
+          s += S.rect(Hx + Lk - kb - 30, Y(wh - Du), kb, legL, 'class="wood2"');
+          const P = Pat(Math.PI / 2); s += S.line(Ax, Y(Az), Hx + P[0], Y(wh + P[1]), 'stroke="#c2410c" stroke-width="3"');
+          s += dimH(0, benchL, Y(wh) - fs * 1.4, `Werkbank ${num(benchL)}`, fs * 0.8);
+          s += dimV(Y(wh), Y(0), -fs * 1.2, num(wh), fs * 0.7);
+        }
+        s += S.circle(Hx, Y(wh), 14, 'fill="#c2410c"') + S.text(Hx, Y(wh) + fs * 1.3, 'Scharnier', `font-size="${fs * 0.5}" text-anchor="middle" fill="#c2410c"`);
+        return drawing(-fs * 2.4, -50, benchL + 300 + fs * 3, v.fCeil + 250 + fs, s, tower ? 'Turmzustand (Seitenansicht): 4 Ebenen, Gasfeder rot, Schwenkbogen gestrichelt, Deckenprüfung.' : 'Tischzustand: Klappteil liegt bündig auf Arbeitshöhe, unten auf dem Auflagebalken, am Ende auf den Klappbeinen. Die Fachböden des Klappteils hängen als Rippen nach unten.');
+      };
+      plan.drawings = [sideView(true), sideView(false)];
       plan.templates = [];
     } else if (v.jig === 'router' || v.jig === 'routerEdge') {
       // ===== Oberfräsen-Nutlade: Nut mittig in Kantholz =====
