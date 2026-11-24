@@ -1245,13 +1245,13 @@ const toolJigs = {
     { g: 'Werkstück (messen!)', id: 'rH', label: 'Höhe', def: 58, unit: 'mm', show: isJig('router') },
     { g: 'Werkstück (messen!)', id: 'rL', label: 'Länge', def: 2000, unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rMode', label: 'Nut in', type: 'select', def: 'face', options: [['face', 'die Fläche (mittig)'], ['edge', 'die Ecke / Längskante (Holz in V-Rinne)']], show: isJig('router') },
-    { g: 'Nut', id: 'rD', label: 'Nutbreite = Fräser-Ø', def: 12, unit: 'mm', show: isJig('router') },
-    { g: 'Nut', id: 'rT', label: 'Nuttiefe', def: 15, unit: 'mm', show: isJig('router') },
+    { g: 'Nut', id: 'rD', label: 'Nutbreite = Fräser-Ø', def: 20, unit: 'mm', show: isJig('router') },
+    { g: 'Nut', id: 'rT', label: 'Nuttiefe', def: 9, help: 'LED-Profil: Profilhöhe + ca. 1 mm', unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rG', label: 'Nutlänge (0 = durchgehend)', def: 0, unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rA', label: 'Nut beginnt bei', def: 100, unit: 'mm', help: 'ab Werkstückanfang, nur bei gestoppter Nut', show: v => v.jig === 'router' && v.rG > 0 },
     { g: 'Oberfräse', id: 'rModel', label: 'Oberfräse', type: 'select', def: 'pof500', options: [['pof500', 'Bosch POF 500 A (500 W)'], ['custom', 'andere – Werte selbst eintragen']], show: isJig('router'),
-      onchange: (val, set) => { if (val === 'pof500') { set('rBase', 120); set('rPl', 45); set('rShank', 6); set('rPass', 3); } } },
-    { g: 'Oberfräse', id: 'rBase', label: 'Grundplatte Ø', def: 120, unit: 'mm', help: 'POF 500 A: geschätzt – messen!', show: isJig('router') },
+      onchange: (val, set) => { if (val === 'pof500') { set('rBase', 122); set('rPl', 45); set('rShank', 6); set('rPass', 3); } } },
+    { g: 'Oberfräse', id: 'rBase', label: 'Grundplatte Ø', def: 122, unit: 'mm', help: 'POF 500 A: ca. 122 (gemessen)', show: isJig('router') },
     { g: 'Oberfräse', id: 'rPl', label: 'Max. Frästiefe (Hub)', def: 45, unit: 'mm', help: 'geschätzt – am Tiefenanschlag ablesen', show: isJig('router') },
     { g: 'Oberfräse', id: 'rShank', label: 'Spannzange / Fräserschaft', def: 6, unit: 'mm', show: isJig('router') },
     { g: 'Oberfräse', id: 'rPass', label: 'Spantiefe je Durchgang', def: 3, unit: 'mm', help: 'kleine Fräse: 2–3 mm, große: bis halber Fräser-Ø', show: isJig('router') },
@@ -1400,8 +1400,9 @@ const toolJigs = {
       const sledW = Bw + 1 + 2 * gS, sledL = Math.max(D + 80, 220);
       const Ll = L + sledL + 200;                                // Lade so lang, dass der Schlitten vor und nach dem Werkstück aufliegt
       const s0 = (Ll - L) / 2;                                   // Werkstückanfang ab Ladenanfang (Endanschlag)
-      const perPass = Math.max(1, Math.min(v.rPass || d / 2, d / 2)), passes = Math.ceil(t / perPass);
+      const perPass = Math.max(1, Math.min(v.rPass || d / 2, d / 2));
       const isPof = v.rModel === 'pof500';
+      const perPassEff = isPof && d >= 18 ? Math.min(perPass, 2) : perPass, passes = Math.ceil(t / perPassEff);
       const reach = sledT + t;                                   // so weit muss der Fräser unter die Schlittenplatte
       const stopped = v.rG > 0;
       const gA = stopped ? v.rA : 0, gLen = stopped ? Math.min(v.rG, L - gA) : L;
@@ -1409,11 +1410,12 @@ const toolJigs = {
       if (!edge && t >= h - 10) msgs.push(['err', `Nuttiefe ${num(t)} lässt zu wenig Restholz (Höhe ${num(h)}).`]);
       if (edge && t > Math.min(b, h) * 0.5) msgs.push(['warn', `Nut ${num(t)} tief in die Ecke ist viel – sie schneidet beide Flächen ${num(t * SQ)} mm breit an.`]);
       if (isPof) {
-        msgs.push(['info', `Eingestellt für Bosch POF 500 A (500 W, Schaft ${num(v.rShank)} mm). Grundplatte Ø ${num(v.rBase)} mm und Hub ${num(v.rPl)} mm sind Schätzwerte – bitte an deiner Fräse messen und eintragen. Bei 500 W lieber viele flache Durchgänge (${num(perPass)} mm) und langsam schieben.`]);
+        msgs.push(['info', `Eingestellt für Bosch POF 500 A (500 W, Schaft ${num(v.rShank)} mm). Grundplatte Ø ${num(v.rBase)} mm und Hub ${num(v.rPl)} mm sind Schätzwerte – bitte an deiner Fräse messen und eintragen. Bei 500 W lieber viele flache Durchgänge (${num(perPassEff)} mm) und langsam schieben.${d >= 18 ? ` Mit dem ${num(d)}-mm-Fräser höchstens 2 mm je Durchgang.` : ''}`]);
         if (d > 16) msgs.push(['warn', `Fräser Ø ${num(d)} ist für 500 W sehr groß – Nut lieber in zwei Bahnen mit kleinerem Fräser.`]);
       }
       if (reach > v.rPl) msgs.push(['warn', `Fräser muss ${num(reach)} mm unter die Schlittenplatte reichen, die Oberfräse schafft ${num(v.rPl)} mm Hub – dünnere Schlittenplatte (Plexiglas 6 mm) oder Nut in mehreren Durchgängen mit tieferer Spannung.`]);
       if (D + 20 > sledW) msgs.push(['info', `Die Grundplatte der Oberfräse (Ø ${num(D)}) ist breiter als die Lade – kein Problem, sie steht seitlich über.`]);
+      if (d >= 18) msgs.push(['info', `LED-Profil: Für eine ${num(d)} mm breite Nut ein Profil mit knapp ${num(d - 0.5)} mm Außenbreite wählen (sitzt dann ohne Kleber). Kabel am Nutende per Bohrung oder gestoppter Nut herausführen, Netzteil (12/24 V) außerhalb des Bettes.`]);
       if (stopped && gA + gLen > L) msgs.push(['err', 'Gestoppte Nut ist länger als das Werkstück.']);
       if (edge) msgs.push(['info', `Ecke: Das Holz liegt auf einer Ecke in der V-Rinne, die gegenüberliegende Ecke zeigt nach oben (Höhe ${num(diagH)} mm über der V-Spitze). Weil ${num(b)} ≠ ${num(h)}, liegt diese Ecke ${num(Math.abs(off))} mm neben der V-Spitze – die V-Rinne sitzt deshalb um diesen Betrag versetzt in der Lade. Holz immer gleich herum einlegen: die ${num(Math.max(b, h))}-mm-Fläche nach ${off >= 0 ? 'rechts' : 'links'} unten. Die Nut schneidet beide Flächen je ${num(t * SQ)} mm breit an.`]);
       if (!edge) msgs.push(['info', `Mittig durch Symmetrie: Die Führungsleisten des Schlittens laufen außen an den Wangen (Abstand innen ${num(Bw + 1)} mm), die Wangen stehen ${num(cwid)} mm auseinander. Das Holz wird mit zwei Keilen mittig gehalten. Kontrolle: flach fräsen, Holz um 180° drehen, nochmal – wird die Nut breiter, ist sie nicht mittig.`]);
