@@ -1250,10 +1250,12 @@ const toolJigs = {
     { g: 'Nut', id: 'rG', label: 'Nutlänge (0 = durchgehend)', def: 0, unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rA', label: 'Nut beginnt bei', def: 100, unit: 'mm', help: 'ab Werkstückanfang, nur bei gestoppter Nut', show: v => v.jig === 'router' && v.rG > 0 },
     { g: 'Oberfräse', id: 'rModel', label: 'Oberfräse', type: 'select', def: 'pof500', options: [['pof500', 'Bosch POF 500 A (500 W)'], ['custom', 'andere – Werte selbst eintragen']], show: isJig('router'),
-      onchange: (val, set) => { if (val === 'pof500') { set('rBase', 122); set('rPl', 45); set('rShank', 6); set('rPass', 3); } } },
+      onchange: (val, set) => { if (val === 'pof500') { set('rBase', 122); set('rPl', 45); set('rShank', 8); set('rPass', 3); set('rRpm', 27000); } } },
     { g: 'Oberfräse', id: 'rBase', label: 'Grundplatte Ø', def: 122, unit: 'mm', help: 'POF 500 A: ca. 122 (gemessen)', show: isJig('router') },
     { g: 'Oberfräse', id: 'rPl', label: 'Max. Frästiefe (Hub)', def: 45, unit: 'mm', help: 'geschätzt – am Tiefenanschlag ablesen', show: isJig('router') },
-    { g: 'Oberfräse', id: 'rShank', label: 'Spannzange / Fräserschaft', def: 6, unit: 'mm', show: isJig('router') },
+    { g: 'Oberfräse', id: 'rShank', label: 'Spannzange / Fräserschaft', def: 8, unit: 'mm', show: isJig('router') },
+    { g: 'Oberfräse', id: 'rRpm', label: 'Drehzahl der Oberfräse', def: 27000, unit: '/min', help: 'POF 500 A: 27000 (Typenschild), ohne Regelung', show: isJig('router') },
+    { g: 'Nut', id: 'rBitRpm', label: 'Fräser: zulässige Drehzahl', def: 22000, unit: '/min', help: 'steht auf Fräser bzw. Packung (wolfcraft 8753: 22000)', show: isJig('router') },
     { g: 'Oberfräse', id: 'rPass', label: 'Spantiefe je Durchgang', def: 3, unit: 'mm', help: 'kleine Fräse: 2–3 mm, große: bis halber Fräser-Ø', show: isJig('router') },
     { g: 'Oberfräse', id: 'rSledT', label: 'Schlittenplatte Stärke', def: 8, unit: 'mm', help: '6–8 Plexiglas, 9–12 Multiplex', show: isJig('router') },
     { g: 'Lade', id: 'rRw', label: 'Seitenwange Breite', def: 40, unit: 'mm', show: isJig('router') },
@@ -1409,6 +1411,7 @@ const toolJigs = {
       if (d >= b - 10) msgs.push(['err', `Fräser Ø ${num(d)} ist zu breit für ein ${num(b)} mm breites Holz.`]);
       if (!edge && t >= h - 10) msgs.push(['err', `Nuttiefe ${num(t)} lässt zu wenig Restholz (Höhe ${num(h)}).`]);
       if (edge && t > Math.min(b, h) * 0.5) msgs.push(['warn', `Nut ${num(t)} tief in die Ecke ist viel – sie schneidet beide Flächen ${num(t * SQ)} mm breit an.`]);
+      if (v.rBitRpm > 0 && v.rRpm > v.rBitRpm) msgs.push(['err', `NICHT VERWENDEN: Der Fräser ist nur bis ${num(v.rBitRpm)}/min zugelassen, die Oberfräse läuft mit ${num(v.rRpm)}/min (${Math.round((v.rRpm / v.rBitRpm - 1) * 100)} % zu schnell). Fräser mit Freigabe ≥ ${num(v.rRpm)}/min kaufen oder eine Fräse mit Drehzahlregelung auf ≤ ${num(v.rBitRpm)}/min stellen.`]);
       if (isPof) {
         msgs.push(['info', `Eingestellt für Bosch POF 500 A (500 W, Schaft ${num(v.rShank)} mm). Grundplatte Ø ${num(v.rBase)} mm und Hub ${num(v.rPl)} mm sind Schätzwerte – bitte an deiner Fräse messen und eintragen. Bei 500 W lieber viele flache Durchgänge (${num(perPassEff)} mm) und langsam schieben.${d >= 18 ? ` Mit dem ${num(d)}-mm-Fräser höchstens 2 mm je Durchgang.` : ''}`]);
         if (d > 16) msgs.push(['warn', `Fräser Ø ${num(d)} ist für 500 W sehr groß – Nut lieber in zwei Bahnen mit kleinerem Fräser.`]);
@@ -1435,7 +1438,7 @@ const toolJigs = {
         ...(stopped ? [{ name: 'Anschlagklotz (gestoppte Nut)', qty: 2, l: 60, b: rw, t: 30, mat: 'Rest', note: 'auf eine Wange zwingen' }] : []),
       ];
       plan.buy = [
-        [`Nutfräser Ø ${num(d)} mm (HM, Schaft ${num(v.rShank)} mm)`, '1', `Schneidenlänge ≥ ${num(t + 5)} mm${isPof ? ' · für die POF 500 A max. Ø 12–16 mm sinnvoll' : ''}`],
+        [`Nutfräser Ø ${num(d)} mm (HM, Schaft ${num(v.rShank)} mm, zugelassen ≥ ${num(v.rRpm)}/min)`, '1', `Schneidenlänge ≥ ${num(t + 5)} mm${isPof ? ' · für die POF 500 A max. Ø 12–16 mm sinnvoll' : ''}`],
         ['Multiplex 18 mm', `${num(Ll)} × ${num(Bw)} + Wangen`, 'im Baumarkt schneiden lassen'],
         [sledT <= 8 ? `Plexiglas ${num(sledT)} mm` : `Multiplex ${num(sledT)} mm`, `${num(sledW)} × ${num(sledL)}`, 'Schlittenplatte'],
         ['Senkkopfschrauben passend zur Oberfräse (Gewinde an der Grundplatte prüfen, meist M4/M5)', '3–4', 'etwas länger als die Originalschrauben (+ Schlittenstärke) – Lochbild von der Originalplatte übertragen'],
