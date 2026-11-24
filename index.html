@@ -1218,7 +1218,7 @@ const toolCleat = {
 /* =====================================================================
    TOOL 3: Schienen & Schablonen
    ===================================================================== */
-const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag'], ['saw', 'Kappsägen-Tisch mit Klappflügeln + Lehrenaufnahme'], ['router', 'Oberfräsen-Nutlade (Nut mittig in Kantholz)']];
+const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag'], ['saw', 'Kappsägen-Tisch mit Klappflügeln + Lehrenaufnahme'], ['router', 'Oberfräsen-Nutlade (Bosch POF 500 A)']];
 const isJig = (...ids) => v => ids.includes(v.jig);
 const toolJigs = {
   id: 'jigs',
@@ -1249,8 +1249,12 @@ const toolJigs = {
     { g: 'Nut', id: 'rT', label: 'Nuttiefe', def: 15, unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rG', label: 'Nutlänge (0 = durchgehend)', def: 0, unit: 'mm', show: isJig('router') },
     { g: 'Nut', id: 'rA', label: 'Nut beginnt bei', def: 100, unit: 'mm', help: 'ab Werkstückanfang, nur bei gestoppter Nut', show: v => v.jig === 'router' && v.rG > 0 },
-    { g: 'Oberfräse', id: 'rBase', label: 'Grundplatte Ø', def: 150, unit: 'mm', show: isJig('router') },
-    { g: 'Oberfräse', id: 'rPl', label: 'Max. Frästiefe (Hub)', def: 50, unit: 'mm', show: isJig('router') },
+    { g: 'Oberfräse', id: 'rModel', label: 'Oberfräse', type: 'select', def: 'pof500', options: [['pof500', 'Bosch POF 500 A (500 W)'], ['custom', 'andere – Werte selbst eintragen']], show: isJig('router'),
+      onchange: (val, set) => { if (val === 'pof500') { set('rBase', 120); set('rPl', 45); set('rShank', 6); set('rPass', 3); } } },
+    { g: 'Oberfräse', id: 'rBase', label: 'Grundplatte Ø', def: 120, unit: 'mm', help: 'POF 500 A: geschätzt – messen!', show: isJig('router') },
+    { g: 'Oberfräse', id: 'rPl', label: 'Max. Frästiefe (Hub)', def: 45, unit: 'mm', help: 'geschätzt – am Tiefenanschlag ablesen', show: isJig('router') },
+    { g: 'Oberfräse', id: 'rShank', label: 'Spannzange / Fräserschaft', def: 6, unit: 'mm', show: isJig('router') },
+    { g: 'Oberfräse', id: 'rPass', label: 'Spantiefe je Durchgang', def: 3, unit: 'mm', help: 'kleine Fräse: 2–3 mm, große: bis halber Fräser-Ø', show: isJig('router') },
     { g: 'Oberfräse', id: 'rSledT', label: 'Schlittenplatte Stärke', def: 8, unit: 'mm', help: '6–8 Plexiglas, 9–12 Multiplex', show: isJig('router') },
     { g: 'Lade', id: 'rRw', label: 'Seitenwange Breite', def: 40, unit: 'mm', show: isJig('router') },
     { g: 'Deine Säge (messen!)', id: 'sB', label: 'Grundplatte Breite', def: 560, unit: 'mm', show: isJig('saw') },
@@ -1396,13 +1400,18 @@ const toolJigs = {
       const sledW = Bw + 1 + 2 * gS, sledL = Math.max(D + 80, 220);
       const Ll = L + sledL + 200;                                // Lade so lang, dass der Schlitten vor und nach dem Werkstück aufliegt
       const s0 = (Ll - L) / 2;                                   // Werkstückanfang ab Ladenanfang (Endanschlag)
-      const perPass = Math.max(2, Math.min(d / 2, 6)), passes = Math.ceil(t / perPass);
+      const perPass = Math.max(1, Math.min(v.rPass || d / 2, d / 2)), passes = Math.ceil(t / perPass);
+      const isPof = v.rModel === 'pof500';
       const reach = sledT + t;                                   // so weit muss der Fräser unter die Schlittenplatte
       const stopped = v.rG > 0;
       const gA = stopped ? v.rA : 0, gLen = stopped ? Math.min(v.rG, L - gA) : L;
       if (d >= b - 10) msgs.push(['err', `Fräser Ø ${num(d)} ist zu breit für ein ${num(b)} mm breites Holz.`]);
       if (!edge && t >= h - 10) msgs.push(['err', `Nuttiefe ${num(t)} lässt zu wenig Restholz (Höhe ${num(h)}).`]);
       if (edge && t > Math.min(b, h) * 0.5) msgs.push(['warn', `Nut ${num(t)} tief in die Ecke ist viel – sie schneidet beide Flächen ${num(t * SQ)} mm breit an.`]);
+      if (isPof) {
+        msgs.push(['info', `Eingestellt für Bosch POF 500 A (500 W, Schaft ${num(v.rShank)} mm). Grundplatte Ø ${num(v.rBase)} mm und Hub ${num(v.rPl)} mm sind Schätzwerte – bitte an deiner Fräse messen und eintragen. Bei 500 W lieber viele flache Durchgänge (${num(perPass)} mm) und langsam schieben.`]);
+        if (d > 16) msgs.push(['warn', `Fräser Ø ${num(d)} ist für 500 W sehr groß – Nut lieber in zwei Bahnen mit kleinerem Fräser.`]);
+      }
       if (reach > v.rPl) msgs.push(['warn', `Fräser muss ${num(reach)} mm unter die Schlittenplatte reichen, die Oberfräse schafft ${num(v.rPl)} mm Hub – dünnere Schlittenplatte (Plexiglas 6 mm) oder Nut in mehreren Durchgängen mit tieferer Spannung.`]);
       if (D + 20 > sledW) msgs.push(['info', `Die Grundplatte der Oberfräse (Ø ${num(D)}) ist breiter als die Lade – kein Problem, sie steht seitlich über.`]);
       if (stopped && gA + gLen > L) msgs.push(['err', 'Gestoppte Nut ist länger als das Werkstück.']);
@@ -1424,10 +1433,10 @@ const toolJigs = {
         ...(stopped ? [{ name: 'Anschlagklotz (gestoppte Nut)', qty: 2, l: 60, b: rw, t: 30, mat: 'Rest', note: 'auf eine Wange zwingen' }] : []),
       ];
       plan.buy = [
-        [`Nutfräser Ø ${num(d)} mm (HM, Schaft passend)`, '1', `Schneidenlänge ≥ ${num(t + 5)} mm`],
+        [`Nutfräser Ø ${num(d)} mm (HM, Schaft ${num(v.rShank)} mm)`, '1', `Schneidenlänge ≥ ${num(t + 5)} mm${isPof ? ' · für die POF 500 A max. Ø 12–16 mm sinnvoll' : ''}`],
         ['Multiplex 18 mm', `${num(Ll)} × ${num(Bw)} + Wangen`, 'im Baumarkt schneiden lassen'],
         [sledT <= 8 ? `Plexiglas ${num(sledT)} mm` : `Multiplex ${num(sledT)} mm`, `${num(sledW)} × ${num(sledL)}`, 'Schlittenplatte'],
-        ['Senkkopfschrauben passend zur Oberfräse (meist M5/M6)', '3–4', 'Fräse auf den Schlitten – Lochbild von der Originalplatte übertragen'],
+        ['Senkkopfschrauben passend zur Oberfräse (Gewinde an der Grundplatte prüfen, meist M4/M5)', '3–4', 'etwas länger als die Originalschrauben (+ Schlittenstärke) – Lochbild von der Originalplatte übertragen'],
         ['Holzschraube 4 × 50 + Leim', 'ca. 20', 'Wangen auf Grundbrett'],
         ['2 Schraubzwingen', '–', 'Lade auf die Werkbank'],
       ];
