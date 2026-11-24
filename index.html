@@ -1218,7 +1218,7 @@ const toolCleat = {
 /* =====================================================================
    TOOL 3: Schienen & Schablonen
    ===================================================================== */
-const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag'], ['saw', 'Kappsägen-Tisch mit Klappflügeln + Lehrenaufnahme'], ['router', 'Oberfräsen-Nutlade (Bosch POF 500 A)']];
+const JIGS = [['rail', 'Führungsschiene Handkreissäge'], ['tsq', 'T-Anschlag 90° (Handkreissäge)'], ['holes32', 'Lochreihen-Bohrschablone 32 mm'], ['stop', 'Ablänglehre mit Anschlag'], ['saw', 'Kappsägen-Tisch mit Klappflügeln + Lehrenaufnahme'], ['router', 'Oberfräsen-Nutlade (Bosch POF 500 A)'], ['routerEdge', 'Oberfräsen-Nutlade für die Kante / Ecke (Bosch POF 500 A)']];
 const isJig = (...ids) => v => ids.includes(v.jig);
 const toolJigs = {
   id: 'jigs',
@@ -1241,24 +1241,24 @@ const toolJigs = {
     { g: 'Lochreihe', id: 'depth', label: 'Bohrtiefe', def: 12, unit: 'mm', show: isJig('holes32') },
     { g: 'Ablänglehre', id: 'Lz', label: 'Ziellänge', def: 445, unit: 'mm', show: isJig('stop') },
     { g: 'Ablänglehre', id: 'qty', label: 'Stückzahl', def: 24, unit: 'Stk', show: isJig('stop') },
-    { g: 'Werkstück (messen!)', id: 'rB', label: 'Breite (Fläche mit Nut)', def: 78, unit: 'mm', show: isJig('router') },
-    { g: 'Werkstück (messen!)', id: 'rH', label: 'Höhe', def: 58, unit: 'mm', show: isJig('router') },
-    { g: 'Werkstück (messen!)', id: 'rL', label: 'Länge', def: 2000, unit: 'mm', show: isJig('router') },
+    { g: 'Werkstück (messen!)', id: 'rB', label: 'Breite (Fläche mit Nut)', def: 78, unit: 'mm', show: isJig('router', 'routerEdge') },
+    { g: 'Werkstück (messen!)', id: 'rH', label: 'Höhe', def: 58, unit: 'mm', show: isJig('router', 'routerEdge') },
+    { g: 'Werkstück (messen!)', id: 'rL', label: 'Länge', def: 2000, unit: 'mm', show: isJig('router', 'routerEdge') },
     { g: 'Nut', id: 'rMode', label: 'Nut in', type: 'select', def: 'face', options: [['face', 'die Fläche (mittig)'], ['edge', 'die Ecke / Längskante (Holz in V-Rinne)']], show: isJig('router') },
-    { g: 'Nut', id: 'rD', label: 'Nutbreite = Fräser-Ø', def: 20, unit: 'mm', show: isJig('router') },
-    { g: 'Nut', id: 'rT', label: 'Nuttiefe', def: 9, help: 'LED-Profil: Profilhöhe + ca. 1 mm', unit: 'mm', show: isJig('router') },
-    { g: 'Nut', id: 'rG', label: 'Nutlänge (0 = durchgehend)', def: 0, unit: 'mm', show: isJig('router') },
-    { g: 'Nut', id: 'rA', label: 'Nut beginnt bei', def: 100, unit: 'mm', help: 'ab Werkstückanfang, nur bei gestoppter Nut', show: v => v.jig === 'router' && v.rG > 0 },
-    { g: 'Oberfräse', id: 'rModel', label: 'Oberfräse', type: 'select', def: 'pof500', options: [['pof500', 'Bosch POF 500 A (500 W)'], ['custom', 'andere – Werte selbst eintragen']], show: isJig('router'),
+    { g: 'Nut', id: 'rD', label: 'Nutbreite = Fräser-Ø', def: 20, unit: 'mm', show: isJig('router', 'routerEdge') },
+    { g: 'Nut', id: 'rT', label: 'Nuttiefe', def: 9, help: 'LED-Profil: Profilhöhe + ca. 1 mm', unit: 'mm', show: isJig('router', 'routerEdge') },
+    { g: 'Nut', id: 'rG', label: 'Nutlänge (0 = durchgehend)', def: 0, unit: 'mm', show: isJig('router', 'routerEdge') },
+    { g: 'Nut', id: 'rA', label: 'Nut beginnt bei', def: 100, unit: 'mm', help: 'ab Werkstückanfang, nur bei gestoppter Nut', show: v => ['router', 'routerEdge'].includes(v.jig) && v.rG > 0 },
+    { g: 'Oberfräse', id: 'rModel', label: 'Oberfräse', type: 'select', def: 'pof500', options: [['pof500', 'Bosch POF 500 A (500 W)'], ['custom', 'andere – Werte selbst eintragen']], show: isJig('router', 'routerEdge'),
       onchange: (val, set) => { if (val === 'pof500') { set('rBase', 122); set('rPl', 45); set('rShank', 8); set('rPass', 3); set('rRpm', 27000); } } },
-    { g: 'Oberfräse', id: 'rBase', label: 'Grundplatte Ø', def: 122, unit: 'mm', help: 'POF 500 A: ca. 122 (gemessen)', show: isJig('router') },
-    { g: 'Oberfräse', id: 'rPl', label: 'Max. Frästiefe (Hub)', def: 45, unit: 'mm', help: 'geschätzt – am Tiefenanschlag ablesen', show: isJig('router') },
-    { g: 'Oberfräse', id: 'rShank', label: 'Spannzange / Fräserschaft', def: 8, unit: 'mm', show: isJig('router') },
-    { g: 'Oberfräse', id: 'rRpm', label: 'Drehzahl der Oberfräse', def: 27000, unit: '/min', help: 'POF 500 A: 27000 (Typenschild), ohne Regelung', show: isJig('router') },
-    { g: 'Nut', id: 'rBitRpm', label: 'Fräser: zulässige Drehzahl', def: 22000, unit: '/min', help: 'steht auf Fräser bzw. Packung (wolfcraft 8753: 22000)', show: isJig('router') },
-    { g: 'Oberfräse', id: 'rPass', label: 'Spantiefe je Durchgang', def: 3, unit: 'mm', help: 'kleine Fräse: 2–3 mm, große: bis halber Fräser-Ø', show: isJig('router') },
-    { g: 'Oberfräse', id: 'rSledT', label: 'Schlittenplatte Stärke', def: 8, unit: 'mm', help: '6–8 Plexiglas, 9–12 Multiplex', show: isJig('router') },
-    { g: 'Lade', id: 'rRw', label: 'Seitenwange Breite', def: 40, unit: 'mm', show: isJig('router') },
+    { g: 'Oberfräse', id: 'rBase', label: 'Grundplatte Ø', def: 122, unit: 'mm', help: 'POF 500 A: ca. 122 (gemessen)', show: isJig('router', 'routerEdge') },
+    { g: 'Oberfräse', id: 'rPl', label: 'Max. Frästiefe (Hub)', def: 45, unit: 'mm', help: 'geschätzt – am Tiefenanschlag ablesen', show: isJig('router', 'routerEdge') },
+    { g: 'Oberfräse', id: 'rShank', label: 'Spannzange / Fräserschaft', def: 8, unit: 'mm', show: isJig('router', 'routerEdge') },
+    { g: 'Oberfräse', id: 'rRpm', label: 'Drehzahl der Oberfräse', def: 27000, unit: '/min', help: 'POF 500 A: 27000 (Typenschild), ohne Regelung', show: isJig('router', 'routerEdge') },
+    { g: 'Nut', id: 'rBitRpm', label: 'Fräser: zulässige Drehzahl', def: 22000, unit: '/min', help: 'steht auf Fräser bzw. Packung (wolfcraft 8753: 22000)', show: isJig('router', 'routerEdge') },
+    { g: 'Oberfräse', id: 'rPass', label: 'Spantiefe je Durchgang', def: 3, unit: 'mm', help: 'kleine Fräse: 2–3 mm, große: bis halber Fräser-Ø', show: isJig('router', 'routerEdge') },
+    { g: 'Oberfräse', id: 'rSledT', label: 'Schlittenplatte Stärke', def: 8, unit: 'mm', help: '6–8 Plexiglas, 9–12 Multiplex', show: isJig('router', 'routerEdge') },
+    { g: 'Lade', id: 'rRw', label: 'Seitenwange Breite', def: 40, unit: 'mm', show: isJig('router', 'routerEdge') },
     { g: 'Deine Säge (messen!)', id: 'sB', label: 'Grundplatte Breite', def: 560, unit: 'mm', show: isJig('saw') },
     { g: 'Deine Säge (messen!)', id: 'sT', label: 'Grundplatte Tiefe', def: 450, unit: 'mm', show: isJig('saw') },
     { g: 'Deine Säge (messen!)', id: 'sH', label: 'Tischhöhe der Säge', def: 100, unit: 'mm', help: 'Unterkante Grundplatte bis Auflagefläche', show: isJig('saw') },
@@ -1386,11 +1386,11 @@ const toolJigs = {
       g += dimH(0, v.Lz, 80 + fs * 1.5, num(v.Lz), fs);
       plan.drawings = [drawing(-fs, -fs * 3, len + fs * 2, 80 + fs * 5, g, 'Draufsicht: Abstand Sägeblatt → Anschlagklotz')];
       plan.templates = [];
-    } else if (v.jig === 'router') {
+    } else if (v.jig === 'router' || v.jig === 'routerEdge') {
       // ===== Oberfräsen-Nutlade: Nut mittig in Kantholz =====
       const b = v.rB, h = v.rH, L = v.rL, d = v.rD, t = v.rT, D = v.rBase, rw = v.rRw;
       const base = 18, sledT = v.rSledT, gS = 12, gH = 20;       // Grundbrett, Schlittenplatte, Führungsleiste 12 × 20
-      const edge = v.rMode === 'edge', SQ = Math.SQRT2;
+      const edge = v.jig === 'routerEdge' || v.rMode === 'edge', SQ = Math.SQRT2;
       // Ecke: Holz liegt auf einer Ecke in einer 90°-V-Rinne; die gegenüberliegende Ecke zeigt nach oben
       const zA = 12;                                             // Spitze der V-Rinne über dem Grundbrett
       const diagH = (b + h) / SQ, off = (b - h) / SQ;            // Höhe der oberen Ecke über der V-Spitze, seitlicher Versatz
