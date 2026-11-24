@@ -1506,7 +1506,15 @@ const toolJigs = {
         view(45, 'Beim Umklappen: Die Böden bleiben waagerecht und bilden eine Treppe – Kisten können stehen bleiben.'),
         view(90, `Werkbank: alle Böden in einer Reihe auf Arbeitshöhe ${num(wh)} mm, am Ende das Klappbein.`),
       ];
-      plan.templates = [];
+      // Bohrschablone 1:1: Lochabstand s gilt für Holme UND Bodenwangen
+      const tl = s + 80, tb = kb + 10;
+      let b = S.rect(0, 8, tl, kb, 'fill="none" stroke="#000" stroke-width="0.35"');
+      b += S.line(0, 8 + kb / 2, tl, 8 + kb / 2, 'stroke="#c00" stroke-width="0.2" stroke-dasharray="3 1.5"');
+      b += holeMark(40, 8 + kb / 2, 10) + holeMark(40 + s, 8 + kb / 2, 10);
+      b += S.text(40, 8 + kb + 6, 'Loch 1', 'font-size="3" text-anchor="middle"') + S.text(40 + s, 8 + kb + 6, `Loch 2 – Abstand ${num(s)} mm`, 'font-size="3" text-anchor="middle"');
+      b += S.text(2, 5, `Bohrschablone Parallelogramm – gilt für Holme (Raster) und Bodenwangen (2 Löcher). Ø 10, Mitte der ${num(kb)}er-Seite`, 'font-size="3"');
+      plan.templates = [{ title: `Bohrschablone ${num(s)} mm (Holme + Bodenwangen)`, w: tl + 2, h: tb + 16, body: b, hint: 'Kontrollmaß prüfen! Für die Holme Loch 2 jeweils als Loch 1 des nächsten Abschnitts nehmen' }];
+      plan.jigs.unshift(['Bohrschablone 1:1', `${num(s)} mm`, 'aus dem PDF ausdrucken, auf eine Holzleiste kleben, Löcher mit Ständerbohrmaschine durchbohren – das ist dann die Bohrlehre']);
     } else if (v.jig === 'router' || v.jig === 'routerEdge') {
       // ===== Oberfräsen-Nutlade: Nut mittig in Kantholz =====
       const b = v.rB, h = v.rH, L = v.rL, d = v.rD, t = v.rT, D = v.rBase, rw = v.rRw;
