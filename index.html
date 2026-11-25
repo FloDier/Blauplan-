@@ -1246,9 +1246,10 @@ const toolJigs = {
     { g: 'Raum', id: 'fTop', label: 'Kiste auf oberster Ebene', def: 280, unit: 'mm', help: 'Höhe, falls oben etwas steht', show: isJig('flipbench') },
     { g: 'Werkbank', id: 'fWh', label: 'Arbeitshöhe', def: 900, unit: 'mm', show: isJig('flipbench') },
     { g: 'Werkbank', id: 'fT', label: 'Tiefe', def: 600, unit: 'mm', show: isJig('flipbench') },
-    { g: 'Werkbank', id: 'fN', label: 'Ebenen (inkl. Unterbau)', def: 4, unit: 'Stk', show: isJig('flipbench') },
-    { g: 'Werkbank', id: 'fD', label: 'Bodenlänge = Ebenenabstand', def: 370, unit: 'mm', help: 'Werkbank = Ebenen × Bodenlänge, Turm = Arbeitshöhe + (Ebenen−1) × Bodenlänge', show: isJig('flipbench') },
-    { g: 'Werkbank', id: 'fBack', label: 'Unterbau nach hinten verlängert', def: 300, unit: 'mm', help: 'Kippschutz im Turm', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fN', label: 'Ebenen (Böden)', def: 4, unit: 'Stk', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fP', label: 'Böden unterhalb des Drehpunkts', def: 1, unit: 'Stk', help: '1 = Drehpunkt beim 2. Boden (spart eine Bodenlänge Turmhöhe)', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fD', label: 'Bodenlänge = Ebenenabstand', def: 550, unit: 'mm', help: 'Werkbank = Ebenen × Bodenlänge, Turm = Arbeitshöhe + (Ebenen − 1 − Böden unter Drehpunkt) × Bodenlänge', show: isJig('flipbench') },
+    { g: 'Werkbank', id: 'fBack', label: 'Unterbau zusätzlich verlängert', def: 100, unit: 'mm', help: 'Kippschutz im Turm', show: isJig('flipbench') },
     { g: 'Werkbank', id: 'fRoll', label: 'Rollen-Bauhöhe', def: 75, unit: 'mm', show: isJig('flipbench') },
     { g: 'Werkbank', id: 'fLoad', label: 'Kisten auf den beweglichen Böden', def: 30, unit: 'kg', show: isJig('flipbench') },
     { g: 'Werkstück (messen!)', id: 'rB', label: 'Breite (Fläche mit Nut)', def: 78, unit: 'mm', show: isJig('router', 'routerEdge') },
@@ -1403,40 +1404,43 @@ const toolJigs = {
       // θ = 0: Holme senkrecht (Turm, Böden übereinander, Abstand s). θ = 90°: Holme waagerecht (Werkbank, Böden in einer Reihe).
       const wh = v.fWh, T = v.fT, n = Math.max(3, Math.min(6, v.fN | 0)), d = v.fD, s = d, tw = 18, kb = 58, kt = 38, hr = v.fRoll;
       const Hfree = v.fCeil - v.fObst;
-      const towerH = wh + (n - 1) * s + v.fTop;
+      const pp = Math.max(0, Math.min(n - 2, v.fP | 0));   // Böden unterhalb des Drehpunkts
+      const towerH = wh + (n - 1 - pp) * s + v.fTop;
+      const lowZ = wh - pp * s;                            // unterster Boden im Turm
       const benchL = n * d;
-      const sMax = Math.floor((Hfree - 50 - wh - v.fTop) / (n - 1) / 10) * 10;
+      const sMax = Math.floor((Hfree - 50 - wh - v.fTop) / (n - 1 - pp) / 10) * 10;
       const holmL = (n - 1) * s + 120;                       // Holm: Drehpunkt Unterbau bis letzter Boden + Überstand
-      const Lb = d + v.fBack;                               // Unterbau-Länge (Boden 0 + Überstand nach hinten als Kippschutz)
+      const Lb = pp * s + d + v.fBack;                      // Unterbau: trägt im Tisch die Böden unter dem Drehpunkt und den Drehpunkt-Boden
       const legL = wh - tw - 20;                             // Klappbein am Ende (Stellfuß 20)
       const kgShelf = (d * T / 1e6) * 11 + 2 * (d / 1000) * 1.2; // Boden Multiplex + 2 Auflageleisten
-      const kgMove = (n - 1) * kgShelf + 4 * (holmL / 1000) * 1.2;
+      const kgMove = n * kgShelf + 4 * (holmL / 1000) * 1.2;
       const load = v.fLoad;                                  // kg Kisten auf den beweglichen Böden
       // Prüfungen
-      if (towerH > Hfree - 50) msgs.push(['err', `Turm ${num(towerH)} mm hoch, frei bis Decke/Hindernis nur ${num(Hfree)} mm. Bodenlänge auf höchstens ${num(sMax)} mm verkürzen (dann Werkbank ${num(n * sMax)} mm) – oder Arbeitshöhe senken bzw. eine Ebene weniger.`]);
+      if (towerH > Hfree - 50) msgs.push(['err', `Turm ${num(towerH)} mm hoch, frei bis Decke/Hindernis nur ${num(Hfree)} mm. Bodenlänge auf höchstens ${num(sMax)} mm verkürzen (dann Werkbank ${num(n * sMax)} mm) – oder einen Boden mehr unter den Drehpunkt.`]);
       else msgs.push(['info', `Deckenprüfung: Turm ${num(towerH)} mm, frei ${num(Hfree)} mm → ${num(Hfree - towerH)} mm Luft. Beim Umklappen wird es nicht höher – die Böden schwenken als Treppe nach außen und unten.`]);
-      if (benchL < 2000) msgs.push(['info', `Werkbank ${num(benchL)} mm. Länger geht nur mit längeren Böden – dann wird auch der Turm höher (Turmhöhe = Arbeitshöhe + ${n - 1} × Bodenlänge).`]);
+      if (benchL < 2000) msgs.push(['info', `Werkbank ${num(benchL)} mm. Länger geht nur mit längeren Böden – dann wird auch der Turm höher (Turmhöhe = Arbeitshöhe + ${n - 1 - pp} × Bodenlänge).`]);
+      if (lowZ < hr + 200) msgs.push(['err', `Der unterste Boden läge im Turm nur ${num(lowZ)} mm über dem Boden – weniger Böden unter den Drehpunkt oder kürzere Böden.`]);
+      if (pp > 0) msgs.push(['info', `Drehpunkt beim ${pp + 1}. Boden: Im Turm hängen ${pp} Boden${pp > 1 ? 'e' : ''} darunter (unterster auf ${num(lowZ)} mm), beim Umklappen schwenk${pp > 1 ? 'en sie' : 't er'} nach hinten über den Unterbau. Das spart ${num(pp * s)} mm Turmhöhe.`]);
       msgs.push(['info', 'Prinzip Parallelogramm: Jeder Boden hängt an zwei parallelen Holmen und bleibt beim Umklappen immer waagerecht – Kisten können stehen bleiben. Im Turm stehen die Böden übereinander, in der Werkbank liegen sie hintereinander auf Arbeitshöhe.']);
       if (towerH / Lb > 2.5) msgs.push(['warn', `Turm ${num(towerH)} mm hoch auf nur ${num(Lb)} mm Unterbau – im Turmzustand immer an der Wand sichern, Rollen fest. Unterbau nach hinten verlängern erhöht die Standsicherheit.`]);
       msgs.push(['warn', `Gewicht der beweglichen Teile ca. ${Math.round(kgMove)} kg${load ? ` + ${num(load)} kg Kisten` : ''}. Umklappen zu zweit: Riegel lösen, oberen Boden führen, mit Halteseil langsam ablassen. Werkbank erst belasten, wenn das Klappbein am Ende steht.`]);
-      plan.kpis = [['Werkbank-Länge', mm(benchL)], ['Turm-Höhe', mm(towerH)], ['Luft zur Decke', mm(Hfree - towerH)], ['Ebenen im Turm', String(n)], ['Boden-Länge = Abstand', mm(d)], ['Bewegtes Gewicht', `ca. ${Math.round(kgMove + load)} kg`]];
+      plan.kpis = [['Werkbank-Länge', mm(benchL)], ['Turm-Höhe', mm(towerH)], ['Luft zur Decke', mm(Hfree - towerH)], ['Ebenen im Turm', String(n)], ['Unterster Boden (Turm)', mm(lowZ)], ['Boden-Länge = Abstand', mm(d)], ['Bewegtes Gewicht', `ca. ${Math.round(kgMove + load)} kg`]];
       // Teile
-      const nPiv = 4 * n;                                    // Drehpunkte: 2 Seiten × 2 Holme × n Punkte (inkl. Unterbau)
+      const nPiv = 4 * n + 4;                                // Böden: 2 Seiten × 2 Holme × n, + 4 Drehpunkte im Unterbau
       plan.parts = [
-        { name: 'Holm A (außen)', qty: 2, l: holmL, b: kb, t: kt, mat: 'Kantholz gehobelt', note: `Bohrungen Ø 10 im Abstand ${num(s)}, erste am Drehpunkt Unterbau` },
+        { name: 'Holm A (außen)', qty: 2, l: holmL, b: kb, t: kt, mat: 'Kantholz gehobelt', note: `${n} Bohrungen Ø 10 im Abstand ${num(s)}; Drehpunkt am ${pp + 1}. Loch von unten` },
         { name: 'Holm B (innen)', qty: 2, l: holmL, b: kb, t: kt, mat: 'Kantholz gehobelt', note: `gleiches Bohrbild wie A – alle 4 Holme zusammen bohren!` },
-        { name: 'Boden (beweglich)', qty: n - 1, l: d - 10, b: T - 2 * kt - 10, t: tw, mat: 'Multiplex', note: 'auf 2 Seitenwangen' },
-        { name: 'Bodenwange (Seite)', qty: 2 * (n - 1), l: d, b: 80, t: kt, mat: 'Kantholz/Multiplex', note: `2 Bohrungen Ø 10 im Abstand ${num(d - 40)}… genau ${num(d)} – Drehpunkte zu Holm A und B` },
-        { name: 'Unterbau Pfosten', qty: 4, l: wh - tw - hr, b: kb, t: kt, mat: 'Kantholz', note: `Drehpunkte PA/PB oben, Abstand ${num(d)}` },
-        { name: 'Unterbau Längsriegel', qty: 4, l: Lb, b: kb, t: kt, mat: 'Kantholz', note: `${num(v.fBack)} mm nach hinten verlängert (Kippschutz)` },
+        { name: 'Boden', qty: n, l: d - 10, b: T - 2 * kt - 10, t: tw, mat: 'Multiplex', note: 'auf 2 Seitenwangen' },
+        { name: 'Bodenwange (Seite)', qty: 2 * n, l: d, b: 80, t: kt, mat: 'Kantholz/Multiplex', note: `2 Bohrungen Ø 10 im Abstand ${num(d - 40)}… genau ${num(d)} – Drehpunkte zu Holm A und B` },
+        { name: 'Unterbau Pfosten', qty: 6, l: wh - tw - hr, b: kb, t: kt, mat: 'Kantholz', note: `je Seite 3: hinten (Auflage im Tisch), Drehpunkt PA und PB im Abstand ${num(d)}` },
+        { name: 'Unterbau Längsriegel', qty: 4, l: Lb, b: kb, t: kt, mat: 'Kantholz', note: 'oben (Auflage im Tisch) und unten, nur in den Seitenebenen – innen muss der Schwenkbereich frei bleiben' },
         { name: 'Unterbau Querriegel', qty: 4, l: T - 2 * kt, b: kb, t: kt, mat: 'Kantholz', note: '' },
-        { name: 'Boden 0 (fest, Unterbau)', qty: 1, l: Lb, b: T, t: tw, mat: 'Multiplex', note: 'Ebene 1 / Anfang der Werkbank' },
         { name: 'Ablageboden unten', qty: 1, l: Lb, b: T, t: tw, mat: 'OSB', note: '' },
         { name: 'Klappbein', qty: 2, l: legL, b: kb, t: kt, mat: 'Kantholz', note: 'am letzten Boden, mit Stellfuß' },
       ];
       plan.buy = [
         ['Kantholz 58 × 38 mm gehobelt, 2,5 m', `ca. ${Math.ceil((4 * holmL + 4 * (wh - hr) + 8 * Lb + 4 * T + 2 * legL + 2 * (n - 1) * d) * 1.15 / 2500)} Stk`, 'Holme gerade und astarm aussuchen'],
-        ['Multiplex 18 mm', `ca. ${(((n - 1) * d * T + 2 * Lb * T) / 1e6 * 1.15).toFixed(2).replace('.', ',')} m²`, 'Böden'],
+        ['Multiplex 18 mm', `ca. ${((n * d * T + Lb * T) / 1e6 * 1.15).toFixed(2).replace('.', ',')} m²`, 'Böden'],
         ['Schlossschraube M10 × 100 + Stoppmutter + 2 U-Scheiben', `${nPiv} Stk`, 'Drehpunkte – Stoppmutter nur so fest, dass es sich leicht dreht'],
         ['Kunststoff-Gleitscheibe Ø 30/10', `${2 * nPiv} Stk`, 'zwischen Holm und Wange, damit es nicht knarzt'],
         ['Steckbolzen Ø 10 mit Sicherung', '2 Stk', 'Riegel Turm und Werkbank'],
@@ -1452,11 +1456,11 @@ const toolJigs = {
         ['Winkel / Wasserwaage', '–', 'Böden im Turm waagerecht prüfen'],
       ];
       plan.steps = [
-        `<b>Holme bohren:</b> Alle 4 Holme (${mm(holmL)}) gestapelt zusammenzwingen, Bohrungen Ø 10 im Raster ${mm(s)} (${n} Löcher) – mit Ständerbohrmaschine oder Bohrführung senkrecht. Das ist der wichtigste Schritt: nur gleiche Abstände ergeben ein echtes Parallelogramm.`,
+        `<b>Holme bohren:</b> Alle 4 Holme (${mm(holmL)}) gestapelt zusammenzwingen, Bohrungen Ø 10 im Raster ${mm(s)} (${n} Löcher für die Böden; das ${pp + 1}. Loch von unten ist zugleich der Drehpunkt im Unterbau) – mit Ständerbohrmaschine oder Bohrführung senkrecht. Das ist der wichtigste Schritt: nur gleiche Abstände ergeben ein echtes Parallelogramm.`,
         `<b>Bodenwangen bohren:</b> Je Boden 2 Wangen, jede mit 2 Bohrungen im Abstand genau ${mm(d)} (= Abstand der Drehpunkte im Unterbau). Ebenfalls im Stapel bohren.`,
-        `<b>Unterbau:</b> Rahmen ${mm(Lb)} × ${mm(T)} auf Rollen, 4 Pfosten bis Arbeitshöhe. Oben in die Pfosten die Drehpunkte PA und PB im Abstand ${mm(d)} bohren. Boden 0 aufschrauben (Oberkante ${mm(wh)}). ${num(v.fBack)} mm nach hinten verlängert als Kippschutz.`,
-        `<b>Böden bauen:</b> ${n - 1} Böden ${mm(d - 10)} lang auf je zwei Seitenwangen schrauben. Die Bodenoberkante liegt so, dass sie in der Werkbank bündig mit Boden 0 ist.`,
-        `<b>Zusammenbauen:</b> Holm A außen, Holm B innen an jede Seite: unterstes Loch an PA bzw. PB, dann jeden Boden mit seinen Wangen an A und B. Schlossschrauben M10 mit Gleitscheiben, Stoppmuttern nur so fest, dass es leicht dreht.`,
+        `<b>Unterbau:</b> Rahmen ${mm(Lb)} × ${mm(T)} auf Rollen, je Seite 3 Pfosten bis knapp unter Arbeitshöhe: hinten als Auflage, dazu die beiden Drehpunkt-Pfosten mit PA und PB im Abstand ${mm(d)}. Riegel nur außen in den Seitenebenen – der Bereich innen bleibt frei, dort schwenk${pp > 1 ? 'en die unteren Böden' : 't der untere Boden'} durch.`,
+        `<b>Böden bauen:</b> ${n} Böden ${mm(d - 10)} lang auf je zwei Seitenwangen schrauben, alle gleich hoch über den Bohrungen – dann liegen sie in der Werkbank bündig.`,
+        `<b>Zusammenbauen:</b> Holm A außen, Holm B innen an jede Seite: ${pp + 1}. Loch von unten an PA bzw. PB, dann jeden Boden mit seinen Wangen an A und B. Schlossschrauben M10 mit Gleitscheiben, Stoppmuttern nur so fest, dass es leicht dreht.`,
         `<b>Riegel und Klappbein:</b> Steckbolzen für den Turm (Holm ↔ Pfosten senkrecht) und für die Werkbank (Holm ↔ Unterbau waagerecht). Am letzten Boden zwei Klappbeine (${mm(legL)}) mit arretierendem Beschlag und Stellfuß.`,
         `<b>Prüfen:</b> Im Turm alle Böden mit der Wasserwaage waagerecht? In der Werkbank alle Böden bündig (Richtlatte)? Wenn nicht: Bohrabstände kontrollieren.`,
         `<b>Wand sichern:</b> Im Turm (${mm(towerH)}) mit Gurt an der Wand einhängen.`,
@@ -1464,45 +1468,45 @@ const toolJigs = {
       ];
       // --- Seitenansichten: Turm, Treppe (45°), Werkbank ---
       const fs = Math.max(benchL + v.fBack, v.fCeil) / 36;
+      const ux0 = 0;
       const Y = z => v.fCeil + 120 - z;
       const view = (thDeg, cap) => {
         const th = thDeg * Math.PI / 180, ux = Math.sin(th), uz = Math.cos(th);
-        let g = S.line(-v.fBack - 150, Y(0), benchL + 250, Y(0), 'stroke="#333" stroke-width="2"');
-        g += S.line(-v.fBack - 150, Y(v.fCeil), benchL + 250, Y(v.fCeil), 'stroke="#333" stroke-width="2"') + S.text(benchL + 240, Y(v.fCeil) - 12, `Decke ${num(v.fCeil)}`, `font-size="${fs * 0.6}" text-anchor="end" class="lbl"`);
+        let g = S.line(-pp * s - v.fBack - 150, Y(0), benchL + 250, Y(0), 'stroke="#333" stroke-width="2"');
+        g += S.line(-pp * s - v.fBack - 150, Y(v.fCeil), benchL + 250, Y(v.fCeil), 'stroke="#333" stroke-width="2"') + S.text(benchL + 240, Y(v.fCeil) - 12, `Decke ${num(v.fCeil)}`, `font-size="${fs * 0.6}" text-anchor="end" class="lbl"`);
         if (v.fObst) g += S.rect(d / 2 - 200, Y(v.fCeil), 400, v.fObst, 'fill="#f5d6d6" stroke="#8a1c1c"');
         // Unterbau (x von -fBack bis d)
-        g += S.rect(-v.fBack, Y(hr + 200), Lb, tw, 'class="wood"');
-        [-v.fBack, d - kb].forEach(x => { g += S.rect(x, Y(wh - tw), kb, wh - tw - hr, 'class="wood2"'); });
-        g += S.rect(0, Y(wh - tw), kb, wh - tw - hr, 'class="wood2"');
-        g += S.rect(-v.fBack, Y(wh), Lb, tw, 'class="wood"');
-        [-v.fBack + 60, d - 60].forEach(x => { g += S.circle(x, Y(hr / 2), hr / 2, 'fill="#555"'); });
+        const xb = -pp * s - v.fBack;
+        g += S.rect(xb, Y(hr + 120), Lb, tw, 'class="wood"');
+        [xb, 0, d - kb].forEach(x => { g += S.rect(x, Y(wh - tw), kb, wh - tw - hr, 'class="wood2"'); });
+        g += S.rect(xb, Y(wh - tw), Lb, kb * 0.6, 'fill="none" stroke="#8a6a3a" stroke-dasharray="6 4"');
+        [xb + 60, d - 60].forEach(x => { g += S.circle(x, Y(hr / 2), hr / 2, 'fill="#555"'); });
         // Holme A (von PA) und B (von PB)
-        const L = (n - 1) * s;
+        const L1 = (n - 1 - pp) * s + 60, L0h = pp * s + 60;
         [[0, '#8a6a3a'], [d, '#b98a4e']].forEach(([x0, c]) => {
-          g += S.line(x0, Y(wh - tw / 2), x0 + (L + 60) * ux, Y(wh - tw / 2 + (L + 60) * uz), `stroke="${c}" stroke-width="7" stroke-linecap="round"`);
+          g += S.line(x0 - L0h * ux, Y(wh - tw / 2 - L0h * uz), x0 + L1 * ux, Y(wh - tw / 2 + L1 * uz), `stroke="${c}" stroke-width="7" stroke-linecap="round"`);
         });
         // Böden
-        for (let i = 1; i < n; i++) {
-          const ax = i * s * ux, az = wh + i * s * uz;
+        for (let i = 0; i < n; i++) {
+          const k = i - pp, ax = k * s * ux, az = wh + k * s * uz;
           g += S.rect(ax, Y(az), d, tw, 'fill="#e7cf9f" stroke="#6b4a1f"');
           g += S.rect(ax + d * 0.15, Y(az + 220), d * 0.55, 220, 'fill="#c9d8ec" stroke="#5b6b7a"');
           g += S.circle(ax, Y(az - tw / 2), 9, 'fill="#c2410c"') + S.circle(ax + d, Y(az - tw / 2), 9, 'fill="#c2410c"');
         }
-        g += S.rect(d * 0.15, Y(wh + 220), d * 0.5, 220, 'fill="#c9d8ec" stroke="#5b6b7a"');
         g += S.circle(0, Y(wh - tw / 2), 10, 'fill="#c2410c"') + S.circle(d, Y(wh - tw / 2), 10, 'fill="#c2410c"');
         if (thDeg === 90) {
-          g += S.rect(L + d - kb - 20, Y(wh - tw), kb, legL, 'class="wood2"');
-          g += dimH(0, benchL, Y(wh) - fs * 1.6, `Werkbank ${num(benchL)}`, fs * 0.8);
+          g += S.rect((n - 1 - pp) * s + d - kb - 20, Y(wh - tw), kb, legL, 'class="wood2"');
+          g += dimH(-pp * s, -pp * s + benchL, Y(wh) - fs * 1.6, `Werkbank ${num(benchL)}`, fs * 0.8);
         }
         if (thDeg === 0) {
-          g += dimV(Y(towerH), Y(0), -v.fBack - fs * 1.2, `Turm ${num(towerH)}`, fs * 0.7);
+          g += dimV(Y(towerH), Y(0), xb - fs * 1.2, `Turm ${num(towerH)}`, fs * 0.7);
           g += dimV(Y(v.fCeil - v.fObst), Y(towerH), d + fs * 1.4, `Luft ${num(Hfree - towerH)}`, fs * 0.6);
           g += dimV(Y(wh + 2 * s), Y(wh + s), d + fs * 2.8, num(s), fs * 0.6);
         }
-        return drawing(-v.fBack - fs * 2.5, -40, benchL + v.fBack + 400 + fs * 2.5, v.fCeil + 300, g, cap);
+        return drawing(-pp * s - v.fBack - fs * 2.5, -40, benchL + v.fBack + 400 + fs * 2.5, v.fCeil + 300, g, cap);
       };
       plan.drawings = [
-        view(0, `Turm: ${n} Ebenen übereinander (Boden 0 fest im Unterbau). Rote Punkte = Drehpunkte, braun = Holme A und B.`),
+        view(0, `Turm: ${n} Ebenen übereinander, Drehpunkt beim ${pp + 1}. Boden (Arbeitshöhe). Rote Punkte = Drehpunkte, braun = Holme A und B.`),
         view(45, 'Beim Umklappen: Die Böden bleiben waagerecht und bilden eine Treppe – Kisten können stehen bleiben.'),
         view(90, `Werkbank: alle Böden in einer Reihe auf Arbeitshöhe ${num(wh)} mm, am Ende das Klappbein.`),
       ];
