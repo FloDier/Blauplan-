@@ -1241,6 +1241,11 @@ const toolJigs = {
     { g: 'Lochreihe', id: 'depth', label: 'Bohrtiefe', def: 12, unit: 'mm', show: isJig('holes32') },
     { g: 'Ablänglehre', id: 'Lz', label: 'Ziellänge', def: 445, unit: 'mm', show: isJig('stop') },
     { g: 'Ablänglehre', id: 'qty', label: 'Stückzahl', def: 24, unit: 'Stk', show: isJig('stop') },
+    { g: 'Voreinstellung', id: 'fPreset', label: 'Maße', type: 'select', def: 'keller', options: [['keller', 'Keller 2,34 m: Werkbank 2,20 m, Kiste oben'], ['foto', 'wie Produktfotos (Thomas Custom Woodworks)']], show: isJig('flipbench'),
+      onchange: (val, set) => {
+        if (val === 'foto') { set('fWh', 965); set('fT', 711); set('fN', 4); set('fP', 1); set('fD', 570); set('fTop', 0); set('fBack', 100); }
+        else { set('fWh', 900); set('fT', 600); set('fN', 4); set('fP', 1); set('fD', 550); set('fTop', 280); set('fBack', 100); }
+      } },
     { g: 'Raum', id: 'fCeil', label: 'Deckenhöhe', def: 2340, unit: 'mm', show: isJig('flipbench') },
     { g: 'Raum', id: 'fObst', label: 'Lampe/Rohr hängt herunter', def: 0, unit: 'mm', help: 'über dem Stellplatz, 0 = nichts', show: isJig('flipbench') },
     { g: 'Raum', id: 'fTop', label: 'Kiste auf oberster Ebene', def: 280, unit: 'mm', help: 'Höhe, falls oben etwas steht', show: isJig('flipbench') },
@@ -1421,6 +1426,7 @@ const toolJigs = {
       if (benchL < 2000) msgs.push(['info', `Werkbank ${num(benchL)} mm. Länger geht nur mit längeren Böden – dann wird auch der Turm höher (Turmhöhe = Arbeitshöhe + ${n - 1 - pp} × Bodenlänge).`]);
       if (lowZ < hr + 200) msgs.push(['err', `Der unterste Boden läge im Turm nur ${num(lowZ)} mm über dem Boden – weniger Böden unter den Drehpunkt oder kürzere Böden.`]);
       if (pp > 0) msgs.push(['info', `Drehpunkt beim ${pp + 1}. Boden: Im Turm hängen ${pp} Boden${pp > 1 ? 'e' : ''} darunter (unterster auf ${num(lowZ)} mm), beim Umklappen schwenk${pp > 1 ? 'en sie' : 't er'} nach hinten über den Unterbau. Das spart ${num(pp * s)} mm Turmhöhe.`]);
+      if (v.fPreset === 'foto') msgs.push(['info', 'Maße wie auf den Produktfotos von Thomas Custom Woodworks (Arbeitshöhe 38″ ≈ 965 mm, Breite 28″ ≈ 711 mm, Böden ca. 21¾–23¾″ ≈ 570 mm im Mittel). Halter, Riegel, Drehpunkte und Zuschnitt sind in dieser App eigenständig berechnet – der gekaufte Plan kann im Detail anders sein.']);
       msgs.push(['info', 'Prinzip Parallelogramm: Jeder Boden hängt an zwei parallelen Holmen und bleibt beim Umklappen immer waagerecht – Kisten können stehen bleiben. Im Turm stehen die Böden übereinander, in der Werkbank liegen sie hintereinander auf Arbeitshöhe.']);
       if (towerH / Lb > 2.5) msgs.push(['warn', `Turm ${num(towerH)} mm hoch auf nur ${num(Lb)} mm Unterbau – im Turmzustand immer an der Wand sichern, Rollen fest. Unterbau nach hinten verlängern erhöht die Standsicherheit.`]);
       msgs.push(['warn', `Gewicht der beweglichen Teile ca. ${Math.round(kgMove)} kg${load ? ` + ${num(load)} kg Kisten` : ''}. Umklappen zu zweit: Riegel lösen, oberen Boden führen, mit Halteseil langsam ablassen. Werkbank erst belasten, wenn das Klappbein am Ende steht.`]);
